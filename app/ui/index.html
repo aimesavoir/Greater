@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Greater</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="brand">
+          <span class="brand-mark"></span>
+          <div>
+            <h1>Greater</h1>
+            <p class="tagline">disk usage analyzer</p>
+          </div>
+        </div>
+        <div class="header-right">
+          <span id="elev-badge" class="badge" hidden>elevated</span>
+        </div>
+      </header>
+
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button class="tab active" role="tab" aria-selected="true" data-page="explorer" id="tab-explorer">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          Explorer
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-page="clean" id="tab-clean">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M14 3l7 7-4 4-7-7z"/><path d="M10 7 4 13v6"/></svg>
+          Clean
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-page="dupes" id="tab-dupes">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="13" height="13" rx="2.5"/><rect x="8" y="8" width="13" height="13" rx="2.5"/></svg>
+          Duplicates
+        </button>
+        <button class="tab" role="tab" aria-selected="false" data-page="stats" id="tab-stats">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
+          Statistics
+        </button>
+      </nav>
+
+      <main class="pages">
+        <section class="page active" id="page-explorer" role="tabpanel" aria-labelledby="tab-explorer">
+          <section class="toolbar">
+            <div id="volumes" class="drive-grid"></div>
+            <div class="controls">
+              <input
+                id="path"
+                class="path"
+                type="text"
+                spellcheck="false"
+                placeholder="Folder to scan, e.g. C:\"
+                value="C:\"
+              />
+              <select id="mode" class="mode" title="Scanner mode">
+                <option value="parallel-w32" selected>fast (parallel)</option>
+                <option value="serial-w32">simple (single thread)</option>
+                <option value="parallel">portable (parallel, read_dir)</option>
+                <option value="serial">baseline (read_dir)</option>
+              </select>
+              <button id="start" class="btn primary">Scan</button>
+              <button id="cancel" class="btn" disabled>Cancel</button>
+            </div>
+          </section>
+
+          <section class="stats" id="stats">
+            <div class="stat"><span class="stat-label">elapsed</span><span class="stat-value" id="s-elapsed">—</span></div>
+            <div class="stat"><span class="stat-label">files</span><span class="stat-value" id="s-files">—</span></div>
+            <div class="stat"><span class="stat-label">folders</span><span class="stat-value" id="s-dirs">—</span></div>
+            <div class="stat"><span class="stat-label">size</span><span class="stat-value" id="s-bytes">—</span></div>
+            <div class="stat"><span class="stat-label">rate</span><span class="stat-value" id="s-rate">—</span></div>
+            <div class="stat"><span class="stat-label">skipped</span><span class="stat-value" id="s-skip">—</span></div>
+          </section>
+
+          <section class="progress-wrap">
+            <div class="progress"><div id="bar" class="progress-bar"></div></div>
+            <p id="status" class="status">Ready.</p>
+          </section>
+
+          <section class="top-section">
+            <div class="top-header">
+              <h2>All files</h2>
+              <span id="file-count" class="file-count"></span>
+            </div>
+            <div class="list-head">
+              <span class="col-name">name</span>
+              <span class="col-size">size</span>
+              <span class="col-pct">% of largest</span>
+            </div>
+            <div id="list-viewport" class="list-viewport" tabindex="0">
+              <div id="list-canvas" class="list-canvas">
+                <div id="list-window" class="list-window"></div>
+              </div>
+            </div>
+          </section>
+
+          <footer class="footer">
+            scanning engine: FindFirstFileExW parallel walker · MFT fast path planned
+          </footer>
+        </section>
+
+        <section class="page" id="page-clean" role="tabpanel" aria-labelledby="tab-clean">
+          <section class="toolbar">
+            <div id="clean-volumes" class="drive-grid"></div>
+            <div class="clean-controls">
+              <span class="clean-controls-msg" id="clean-controls-msg">Hover a drive card, then click Clean.</span>
+              <button id="clean-cancel" class="btn danger" hidden>Cancel</button>
+            </div>
+          </section>
+
+          <section class="stats" id="clean-stats">
+            <div class="stat"><span class="stat-label">scanned</span><span class="stat-value" id="c-scanned">—</span></div>
+            <div class="stat"><span class="stat-label">elapsed</span><span class="stat-value" id="c-elapsed">—</span></div>
+            <div class="stat"><span class="stat-label">junk files</span><span class="stat-value" id="c-files">—</span></div>
+            <div class="stat"><span class="stat-label">reclaimable</span><span class="stat-value" id="c-bytes">—</span></div>
+            <div class="stat"><span class="stat-label">selected</span><span class="stat-value" id="c-selected">—</span></div>
+          </section>
+
+          <section class="progress-wrap">
+            <div class="progress"><div id="clean-bar" class="progress-bar"></div></div>
+            <p id="clean-status" class="status">Hover a drive card and press Clean to scan it for junk.</p>
+          </section>
+
+          <section class="top-section">
+            <div class="top-header">
+              <h2>Files to delete</h2>
+              <span class="chips">
+                <button class="chip on" data-filter="all" id="clean-filter-all">all</button>
+                <button class="chip" data-filter="safe" id="clean-filter-safe">safe</button>
+                <button class="chip" data-filter="optional" id="clean-filter-optional">optional</button>
+              </span>
+            </div>
+            <div class="list-head clean-head">
+              <span class="col-check">
+                <input id="clean-check-all" class="row-check" type="checkbox" title="Select all listed" />
+              </span>
+              <span class="col-name">file</span>
+              <span class="col-cat">why it is junk</span>
+              <span class="col-size">size</span>
+              <span class="col-acts"></span>
+            </div>
+            <div id="clean-viewport" class="list-viewport" tabindex="0">
+              <div id="clean-canvas" class="list-canvas">
+                <div id="clean-window" class="list-window"></div>
+              </div>
+            </div>
+            <div class="clean-actions">
+              <span id="clean-hint" class="clean-hint">Safe items are ticked by default.</span>
+              <button id="clean-none" class="btn ghost">Select none</button>
+              <button id="clean-all-btn" class="btn ghost">Select all</button>
+              <button id="clean-trash" class="btn primary" disabled>Move to Recycle Bin</button>
+              <button id="clean-perm" class="btn danger" disabled>Delete permanently</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="page" id="page-dupes" role="tabpanel" aria-labelledby="tab-dupes">
+          <section class="toolbar">
+            <div id="dupes-volumes" class="drive-grid"></div>
+            <div class="clean-controls">
+              <span class="clean-controls-msg" id="dupes-controls-msg">Hover a drive card, then click Find duplicates.</span>
+              <div class="dupes-opts">
+                <label class="dupes-field">smallest file
+                  <select id="dupes-minsize" class="mode" title="Ignore files smaller than this">
+                    <option value="1024">1 KiB</option>
+                    <option value="65536">64 KiB</option>
+                    <option value="1048576" selected>1 MiB</option>
+                    <option value="10485760">10 MiB</option>
+                    <option value="104857600">100 MiB</option>
+                  </select>
+                </label>
+                <label class="dupes-field">keep
+                  <select id="dupes-keep" class="mode" title="Which copy of each group to keep by default">
+                    <option value="oldest" selected>oldest copy</option>
+                    <option value="newest">newest copy</option>
+                    <option value="shortest">shortest path</option>
+                  </select>
+                </label>
+              </div>
+              <button id="dupes-cancel" class="btn danger" hidden>Cancel</button>
+            </div>
+          </section>
+
+          <section class="stats" id="dupes-stats">
+            <div class="stat"><span class="stat-label">scanned</span><span class="stat-value" id="d-scanned">—</span></div>
+            <div class="stat"><span class="stat-label">elapsed</span><span class="stat-value" id="d-elapsed">—</span></div>
+            <div class="stat"><span class="stat-label">groups</span><span class="stat-value" id="d-groups">—</span></div>
+            <div class="stat"><span class="stat-label">copies</span><span class="stat-value" id="d-files">—</span></div>
+            <div class="stat"><span class="stat-label">reclaimable</span><span class="stat-value" id="d-wasted">—</span></div>
+            <div class="stat"><span class="stat-label">selected</span><span class="stat-value" id="d-selected">—</span></div>
+          </section>
+
+          <section class="progress-wrap">
+            <div class="progress"><div id="dupes-bar" class="progress-bar"></div></div>
+            <p id="dupes-status" class="status">Ready. Set a size floor, then run a drive.</p>
+          </section>
+
+          <section class="top-section">
+            <div class="top-header">
+              <h2>Duplicate groups</h2>
+              <span id="dupes-summary" class="file-count"></span>
+            </div>
+            <div id="dupes-list" class="dupes-list"></div>
+            <div class="clean-actions">
+              <span id="dupes-hint" class="clean-hint">One copy per group is kept by default.</span>
+              <button id="dupes-more" class="btn ghost" hidden>Load more</button>
+              <button id="dupes-none" class="btn ghost">Keep all</button>
+              <button id="dupes-all" class="btn ghost">Select all duplicates</button>
+              <button id="dupes-trash" class="btn primary" disabled>Move to Recycle Bin</button>
+              <button id="dupes-perm" class="btn danger" disabled>Delete permanently</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="page" id="page-stats" role="tabpanel" aria-labelledby="tab-stats">
+          <div class="placeholder">
+            <div class="ph-icon">
+              <svg viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
+            </div>
+            <h2>Statistics</h2>
+            <p>Make sense of what the scans found.</p>
+            <ul class="ph-list">
+              <li>space used by folder and by file type</li>
+              <li>biggest growth since the previous scan</li>
+              <li>drive usage over time</li>
+              <li>scan history: duration, files, throughput</li>
+              <li>charts (bar / donut / treemap)</li>
+            </ul>
+            <span class="ph-badge">page shell added — content to be designed together</span>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="modal-info" class="modal" hidden>
+      <div class="modal-card">
+        <header class="modal-head">
+          <h3 id="info-title">File information</h3>
+          <button class="icon-btn modal-x" aria-label="Dismiss" title="Close">✕</button>
+        </header>
+        <div id="info-body" class="modal-body"></div>
+        <footer class="modal-foot">
+          <button class="btn" data-action="open" aria-label="Open location">Open location</button>
+          <button class="btn" data-action="trash" aria-label="Move to trash">Move to trash</button>
+          <button class="btn danger" data-action="delete" aria-label="Delete permanently">Delete permanently</button>
+          <button class="btn ghost modal-x" aria-label="Dismiss">Close</button>
+        </footer>
+      </div>
+    </div>
+
+    <div id="modal-confirm" class="modal" hidden>
+      <div class="modal-card narrow">
+        <header class="modal-head">
+          <h3 id="confirm-title">Are you sure?</h3>
+        </header>
+        <div class="modal-body">
+          <p id="confirm-text"></p>
+        </div>
+        <footer class="modal-foot">
+          <button id="confirm-cancel" class="btn ghost" aria-label="Dismiss">Cancel</button>
+          <button id="confirm-ok" class="btn danger" aria-label="Confirm">Confirm</button>
+        </footer>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
