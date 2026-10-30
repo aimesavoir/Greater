@@ -125,6 +125,58 @@ Get-Process greater -ErrorAction SilentlyContinue | Stop-Process -Force
 Set `$env:GREATER_DEBUG="1"` to log scan_start / progress / done emits to
 `%TEMP%\greater_debug.log` (off by default).
 
+### Public product page & releases
+
+`X:\Greater\site\` is the landing page but is **its own git repository** (it is
+in `.gitignore` here) pushed to the public repo
+[`aimesavoir/Greater-Site`](https://github.com/aimesavoir/Greater-Site), served
+by GitHub Pages from `main` / root:
+
+- <https://aimesavoir.github.io/Greater-Site/> (English)
+- <https://aimesavoir.github.io/Greater-Site/?lang=ar> (Arabic, RTL)
+
+Pages is free only for public repos, and release assets of a private repo are
+not publicly downloadable — that is why the page and the installer live in the
+public repo while the sources stay private here.
+
+Site files: `index.html` (English inline; every translatable element carries
+`data-t="key"`), `styles.css` (palette copied from `app/ui/styles.css`; RTL
+rules; breakpoints 940px / 560px), `main.js` (Arabic `AR` dictionary, toggle,
+`?lang=` param, `localStorage` `greater.site.lang`), `img/` (real app
+screenshots), `.nojekyll`. No build step and no external requests.
+
+**Text changes need both sides**: `index.html` and the `AR` map in `main.js`.
+`main.js` snapshots the English `innerHTML` at load, so switching back is
+lossless. Verify with a static server plus headless Edge:
+
+```powershell
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --headless=new `
+  --disable-gpu --hide-scrollbars --virtual-time-budget=8000 `
+  --window-size=1440,6100 --screenshot=<out.png> http://127.0.0.1:8099/index.html
+```
+
+Screenshots are 1800 px JPEG q88 (~200 KB each) and load **eagerly**: lazy
+images never trigger in the OpenCode Review pane (it does not paint), and 2.4 MB
+of PNGs is too heavy for a landing page anyway. `body` uses
+`overflow-x: clip`, not `hidden` — `hidden` makes `<body>` a second scroll
+container.
+
+Publishing a new version (bump the version in `tauri.conf.json`, rebuild, then):
+
+```powershell
+$env:PATH="C:\Program Files\GitHub CLI;$env:PATH"
+cd X:\Greater\site; git add -A; git commit -m "..."; git push
+gh release create v1.0.0 -R aimesavoir/Greater-Site <setup.exe> --title "Greater 1.0.0" --notes-file <notes.md>
+```
+
+The download buttons point at
+`https://github.com/aimesavoir/Greater-Site/releases/latest/download/Greater_1.0.0_x64-setup.exe`,
+so the asset name must stay exactly `Greater_<version>_x64-setup.exe`. Check the
+Pages build with `gh api repos/aimesavoir/Greater-Site/pages/builds/latest`
+(`status: built`) and confirm the asset hash matches the local installer.
+`gh` resolves the repo from the working directory — pass `-R` when not in
+`site/`, or it looks at the private repo and reports "release not found".
+
 App commands: `list_volumes` (letter/label/fs/total/free), `scan_start`,
 `stats_start(path, mode, threads)`, `clean_start`,
 `dupes_start(path, mode, threads, min_size)`, `scan_cancel`,
@@ -346,3 +398,11 @@ verify characters by codepoint, not by eye.
 - [x] Stage 5: packaging — NSIS installer (`Greater_1.0.0_x64-setup.exe`,
         4.7 MiB, perMachine, embedded WebView2 bootstrapper). Verified install /
         launch / silent uninstall on Win11.
+- [x] Stage 6: publishing — private source repo `aimesavoir/Greater`; public
+        product page + installer in `aimesavoir/Greater-Site` (GitHub Pages,
+        EN + AR, four real screenshots), release `v1.0.0` with the installer
+        asset. Verified: live page 200, 8/8 images, no console errors, no
+        horizontal overflow, Arabic RTL fully translated, download asset hash
+        identical to the local installer.
+        Remaining: license not chosen; code signing certificate (SmartScreen
+        warns on the unsigned installer).
