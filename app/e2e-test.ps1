@@ -1,4 +1,5 @@
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
 
 $AllCond = [System.Windows.Automation.Condition]::TrueCondition
 
@@ -34,7 +35,7 @@ function Is-Type($e, $t) { $e.Current.ControlType.ProgrammaticName -eq $t }
 function Status-Name($e) {
     $n = $e.Current.Name
     if ((Is-Type $e 'ControlType.Text') -and $n -notmatch 'engine' -and
-        $n -match '^(Done|Cancelled|Cancelling|Scanning|scanning|Found|No duplicates|Nothing to clean|error|Ready|JS-|listen|volume list|cancel:|Moved to Recycle|Deleted permanently)') {
+          $n -match '^(Done|Cancelled|Cancelling|Scanning|scanning|Found|Analyzed|No duplicates|Nothing to clean|error|Ready|JS-|listen|volume list|cancel:|Moved to Recycle|Deleted permanently)') {
         return $n
     }
     ''
@@ -184,6 +185,15 @@ $s = Wait-Status $paneProvider '^Ready|^JS-|^listen' 40
 if ($s -match '^Ready') { Write-Host "PASS: app ready" }
 elseif ($s -match '^listen') { Write-Host "FAIL: event listeners rejected -> $s"; $failures += 'acls' }
 else { Write-Host "FAIL: app did not become ready -> $s"; $failures += 'boot' }
+
+# First-run onboarding (fresh profile only): accept the defaults so the rest of
+# the run is unobstructed. On later runs the flag is already stored.
+$firstrun = Find-ButtonByAria $paneProvider 'Start using Greater' 2
+if ($firstrun) {
+    $firstrun.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 600
+    Write-Host "PASS: first-run onboarding dismissed"
+}
 
 # ---- test 1: small folder scan ----
 try {
@@ -347,6 +357,59 @@ $hdr = Wait-Element $paneProvider { param($e)
 if ($hdr) { Write-Host "PASS: list re-rendered after tab switch -> $($hdr.Current.Name)" }
 else { Write-Host "FAIL: list empty after tab switch"; $failures += 'tabs' }
 
+# ---- test 5b: Explorer "By folder" mode (aggregated folder list) ----
+# The <select> popup is rendered by Chromium inside the a11y tree; if the
+# option cannot be invoked there, fall back to keyboard (focus + arrow key).
+function Select-Option($paneProvider, $comboAria, $optionText, $downs, $timeoutSec) {
+    $combo = Wait-Element $paneProvider { param($e)
+        (Is-Type $e 'ControlType.ComboBox') -and $e.Current.Name -eq $comboAria } $timeoutSec
+    if (-not $combo) { throw "combo '$comboAria' not found" }
+    $done = $false
+    try {
+        $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+        Start-Sleep -Milliseconds 500
+        $item = Wait-Element $paneProvider { param($e)
+            (Is-Type $e 'ControlType.ListItem') -and $e.Current.Name -eq $optionText } 4
+        if ($item) {
+            try { $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); $done = $true }
+            catch {
+                try { $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select(); $done = $true } catch {}
+            }
+        }
+        if (-not $done) { $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse() }
+    } catch {}
+    if (-not $done) {
+        $combo.SetFocus()
+        Start-Sleep -Milliseconds 300
+        for ($i = 0; $i -lt $downs; $i++) { [System.Windows.Forms.SendKeys]::SendWait("{DOWN}"); Start-Sleep -Milliseconds 150 }
+        $done = $true
+    }
+    Start-Sleep -Milliseconds 700
+    if (-not $done) { throw "could not select '$optionText'" }
+}
+
+try { Select-Option $paneProvider 'List by' 'By folder' 1 8 } catch { Write-Host "FAIL: switch to By folder -> $_"; $failures += 'folder' }
+if (Page-HasText 'ALL FOLDERS' 8) { Write-Host "PASS: By folder shows the folder heading" }
+else { Write-Host "FAIL: folder heading missing"; $failures += 'folder' }
+$fhdr = Wait-Element $paneProvider { param($e)
+    (Is-Type $e 'ControlType.Text') -and $e.Current.Name -match '(folders \(largest first\)|largest of .* folders)' } 10
+if ($fhdr) { Write-Host "PASS: folder list populated -> $($fhdr.Current.Name)" }
+else { Write-Host "FAIL: folder count label missing"; $failures += 'folder' }
+# The top of the folder list is machine-specific (Windows may sit below the
+# fold), so assert on the scan root plus the biggest child folder instead.
+$rootrow = Wait-Element $paneProvider { param($e) (Is-Type $e 'ControlType.Text') -and $e.Current.Name -eq 'C:\' } 10
+$urow = Wait-Element $paneProvider { param($e) (Is-Type $e 'ControlType.Text') -and $e.Current.Name -eq 'Users' } 10
+$wrow = $null
+if (-not $urow) { $wrow = Wait-Element $paneProvider { param($e) (Is-Type $e 'ControlType.Text') -and $e.Current.Name -eq 'Windows' } 10 }
+if ($rootrow -and ($urow -or $wrow)) { Write-Host "PASS: folder rows rendered (C:\ root + child folder)" }
+else { Write-Host "FAIL: folder rows missing (root=$([bool]$rootrow) users=$([bool]$urow) windows=$([bool]$wrow))"; $failures += 'folder' }
+
+try { Select-Option $paneProvider 'List by' 'By file' 1 8 } catch { Write-Host "FAIL: switch back to By file -> $_"; $failures += 'folder' }
+$hdr = Wait-Element $paneProvider { param($e)
+    (Is-Type $e 'ControlType.Text') -and $e.Current.Name -match '(files \(largest first\)|largest of .* files)' } 10
+if ($hdr) { Write-Host "PASS: back to By file -> $($hdr.Current.Name)" }
+else { Write-Host "FAIL: file list did not come back"; $failures += 'folder' }
+
 # ---- test 6: file actions on a junk folder ----
 $junk = "D:\greater-junk"
 $bigName = "big file (1).bin"
@@ -372,8 +435,8 @@ foreach ($e in (Get-Elements (Get-Pane))) {
 }
 if ($texts -contains $bigName -and $texts -contains $smallName) { Write-Host "PASS: rows show file names" }
 else { Write-Host "FAIL: file name rows missing"; $failures += 'rownames' }
-if ($texts -contains '100%' -and $texts -contains '25.0%') { Write-Host "PASS: percent-of-largest rendered (100%, 25.0%)" }
-else { Write-Host "INFO: percent cells: $(($texts | Where-Object { $_ -match '^\d+(\.\d+)?%$' }) -join ', ')" }
+if ($texts -contains '3.0 MB' -and $texts -contains '768 KB') { Write-Host "PASS: size column rendered (3.0 MB, 768 KB)" }
+else { Write-Host "INFO: size cells: $(($texts | Where-Object { $_ -match '^\d+(\.\d+)? [KMG]B$' }) -join ', ')" }
 
 # more info modal
 $infoBtn = Find-ButtonByAria $paneProvider 'More info' 10
@@ -465,7 +528,7 @@ if ($texts -contains 'Windows Temp' -and $texts -contains 'Windows Update cache'
 } else { Write-Host "INFO: junk badges: $(($texts | Where-Object { $_ -match 'Temp|cache' }) -join ', ')" }
 
 # selection readout: count + size must update live as the list is ticked
-if ((Page-HasMatch 'junk files selected' 5) -and (Page-HasMatch '^3 files . 6\.0 MiB$' 5)) {
+if ((Page-HasMatch 'junk files selected' 5) -and (Page-HasMatch '^3 files . 6\.0 MB$' 5)) {
     Write-Host "PASS: selected readout shows count and size"
 } else { Write-Host "FAIL: selected readout missing"; $failures += 'selected' }
 Click-ButtonByName 'Select none' 10 | Out-Null
@@ -488,8 +551,22 @@ if ($perm) {
     $ok = Find-ButtonByAria $paneProvider 'Confirm' 10
     if ($ok) {
         $ok.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        # The live deletion modal should be up with a progress readout.
+        if (Page-HasMatch 'Removing files|Done' 10) {
+            Write-Host "PASS: deleting modal shown during purge"
+        } else { Write-Host "FAIL: deleting modal not shown"; $failures += 'delmodal' }
         $s = Wait-Status $paneProvider '^Deleted permanently: |^error' 30
         Start-Sleep -Milliseconds 600
+        # On completion the modal flips to Done and offers a Close button.
+        if (Page-HasMatch '^Done$' 10) {
+            Write-Host "PASS: deleting modal shows Done after purge"
+        } else { Write-Host "FAIL: deleting modal did not reach Done"; $failures += 'delmodaldone' }
+        $closeBtn = Find-ButtonByAria $paneProvider 'Close' 10
+        if ($closeBtn) {
+            $closeBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            Start-Sleep -Milliseconds 300
+            Write-Host "PASS: deleting modal Close dismisses it"
+        } else { Write-Host "FAIL: deleting modal Close button missing"; $failures += 'delmodalclose' }
         $gone = (-not (Test-Path "$clean\Windows\Temp\w.tmp")) -and
                 (-not (Test-Path "$clean\Users\bob\AppData\Local\Temp\a.tmp")) -and
                 (-not (Test-Path "$clean\Windows\SoftwareDistribution\Download\big.cab"))
@@ -526,7 +603,7 @@ if (($texts -contains 'photo.bin') -and ($texts -notcontains 'same-size-diff.bin
 } else { Write-Host "FAIL: duplicate list wrong"; $failures += 'dupelist' }
 if (Page-HasMatch '1 groups . 2 copies' 5) { Write-Host "PASS: group summary shows 1 group / 2 copies" }
 else { Write-Host "FAIL: group summary missing"; $failures += 'dupesum' }
-if (Page-HasMatch '^1 files . 2\.0 MiB$' 5) { Write-Host "PASS: default selection = 1 copy (2.0 MiB)" }
+if (Page-HasMatch '^1 files . 2\.0 MB$' 5) { Write-Host "PASS: default selection = 1 copy (2.0 MB)" }
 else { Write-Host "FAIL: default selection wrong"; $failures += 'dupesel' }
 
 Click-ButtonByName 'Keep all' 10 | Out-Null
@@ -535,7 +612,7 @@ if (Page-HasMatch '^none$' 5) { Write-Host "PASS: 'Keep all' clears selection" }
 else { Write-Host "FAIL: 'Keep all' did not clear"; $failures += 'dupkeepall' }
 Click-ButtonByName 'Select all duplicates' 10 | Out-Null
 Start-Sleep -Milliseconds 300
-if (Page-HasMatch '^1 files . 2\.0 MiB$' 5) { Write-Host "PASS: 'Select all duplicates' restores one copy" }
+if (Page-HasMatch '^1 files . 2\.0 MB$' 5) { Write-Host "PASS: 'Select all duplicates' restores one copy" }
 else { Write-Host "FAIL: 'Select all duplicates' wrong"; $failures += 'dupselall' }
 
 $perm = Click-ButtonByName 'Delete permanently' 10
@@ -556,6 +633,57 @@ if ($perm) {
 
 if (Test-Path "Z:\") { subst Z: /d | Out-Null }
 Remove-Item $dupes -Recurse -Force -ErrorAction SilentlyContinue
+
+# ---- test 9: Statistics page (per-drive file-type breakdown) ----
+$stats = "D:\greater-stats"
+if (Test-Path $stats) { Remove-Item $stats -Recurse -Force -ErrorAction SilentlyContinue }
+New-Item -ItemType Directory -Path $stats | Out-Null
+New-PatternFile "$stats\pic.jpg"      (3MB) 65
+New-PatternFile "$stats\clip.mp4"     (2MB) 66
+New-PatternFile "$stats\song.mp3"     (1MB) 67
+New-PatternFile "$stats\doc.pdf"      (4MB) 68
+New-PatternFile "$stats\data.zip"     (2MB) 69
+if (Test-Path "Z:\") { subst Z: /d | Out-Null }
+subst Z: $stats | Out-Null
+try { Click-Tab 'Statistics' } catch { Write-Host "FAIL: click Statistics tab -> $_"; $failures += 'stats' }
+if (Page-HasText 'Statistics' 6) { Write-Host "PASS: Statistics tab shows its page" }
+else { Write-Host "FAIL: Statistics page did not appear"; $failures += 'stats' }
+try {
+    $card = Wait-Element $paneProvider { param($e)
+        (Is-Type $e 'ControlType.Button') -and $e.Current.Name -match '^Z:' -and $e.Current.IsEnabled } 20
+    if (-not $card) { throw "Z: drive card not found" }
+    $card.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+} catch { Write-Host "FAIL: start stats scan -> $_"; $failures += 'stats' }
+$s = Wait-Status $paneProvider '^Analyzed|^error|^JS-' 60
+if ($s -match '^Analyzed') { Write-Host "PASS: stats scan -> $s" }
+else { Write-Host "FAIL: stats scan -> $s"; $failures += 'stats' }
+Start-Sleep -Milliseconds 800
+$texts = @()
+foreach ($e in (Get-Elements (Get-Pane))) { if (Is-Type $e 'ControlType.Text') { $texts += $e.Current.Name } }
+$want = @('Images', 'Videos', 'Audio', 'Documents', 'Archives')
+$missing = $want | Where-Object { $texts -notcontains $_ }
+if (-not $missing) { Write-Host "PASS: stats legend shows all categories" }
+else { Write-Host "FAIL: stats legend missing: $($missing -join ', ')"; $failures += 'statslegend' }
+
+if (Test-Path "Z:\") { subst Z: /d | Out-Null }
+Remove-Item $stats -Recurse -Force -ErrorAction SilentlyContinue
+
+# ---- test 10: About box (reachable from the Help page) ----
+$helpBtn = Wait-Element $paneProvider { param($e)
+    (Is-Type $e 'ControlType.Button') -and $e.Current.Name -like 'Help*' } 10
+if ($helpBtn) { $helpBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 700 }
+else { Write-Host "FAIL: Help button not found"; $failures += 'about' }
+$aboutBtn = Find-ButtonByAria $paneProvider 'About' 10
+if ($aboutBtn) { $aboutBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 700 }
+else { Write-Host "FAIL: About button not found in Help"; $failures += 'about' }
+$texts = @()
+foreach ($e in (Get-Elements (Get-Pane))) { if ($e.Current.Name) { $texts += $e.Current.Name } }
+$want = @('Version 1.0', 'Mohamed Baroudi', 'MECATROTEC', 'baroudi.inc@gmail.com')
+$missing = $want | Where-Object { $texts -notcontains $_ }
+if (-not $missing) { Write-Host "PASS: About box shows author, company, version and contact" }
+else { Write-Host "FAIL: About box missing: $($missing -join ', ')"; $failures += 'about' }
+$closeBtn = Find-ButtonByAria $paneProvider 'Close' 10
+if ($closeBtn) { $closeBtn.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 500 }
 
 Write-Host ""
 if ($failures.Count -eq 0) { Write-Host "ALL TESTS PASSED" } else { Write-Host "FAILURES: $($failures -join ', ')" }

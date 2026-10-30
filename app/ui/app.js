@@ -6,7 +6,7 @@ const $ = (id) => document.getElementById(id);
 /* ---------- formatting helpers ---------- */
 
 function human(bytes) {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  const units = ["B", "KB", "MB", "GB", "TB"];
   let v = bytes;
   let i = 0;
   while (v >= 1024 && i < units.length - 1) {
@@ -21,6 +21,38 @@ function humanRate(entriesPerSec) {
   if (entriesPerSec >= 1e3) return `${(entriesPerSec / 1e3).toFixed(0)}k/s`;
   return `${Math.round(entriesPerSec)}/s`;
 }
+
+/* ---------- theme ---------- */
+
+const THEME_KEY = "greater.theme";
+const ONBOARD_KEY = "greater.onboarded";
+const THEME_MEDIA = window.matchMedia("(prefers-color-scheme: dark)");
+
+function themePref() {
+  const v = localStorage.getItem(THEME_KEY);
+  return v === "light" || v === "system" ? v : "dark";
+}
+
+function applyTheme(pref = themePref()) {
+  const dark = pref === "system" ? THEME_MEDIA.matches : pref === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.querySelectorAll(".seg-btn[data-theme]").forEach((b) => {
+    const on = b.dataset.theme === pref;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+  });
+}
+
+function setTheme(pref) {
+  localStorage.setItem(THEME_KEY, pref);
+  applyTheme(pref);
+}
+
+THEME_MEDIA.addEventListener("change", () => {
+  if (themePref() === "system") applyTheme("system");
+});
+
+applyTheme();
 
 function escapeHtml(s) {
   return s
@@ -38,11 +70,6 @@ function baseName(p) {
 function dirName(p) {
   const i = Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/"));
   return i <= 0 ? p : p.slice(0, i);
-}
-
-function pctText(entry, maxSize) {
-  const pct = maxSize > 0 ? (entry.size / maxSize) * 100 : 0;
-  return pct >= 10 ? pct.toFixed(1) : pct >= 1 ? pct.toFixed(2) : pct > 0 ? pct.toFixed(3) : "0";
 }
 
 function fillColor(pct) {
@@ -80,7 +107,8 @@ window.addEventListener("error", (e) => {
 // scanner, so only one can run at a time.
 let runKind = null;
 let cleanPath = "";
-let dupPath = "";
+let dupPath = ""
+let statsPath = "";
 
 function setStatus(msg) {
   $("status").textContent = msg;
@@ -95,16 +123,27 @@ function setUi() {
   $("cancel").disabled = runKind !== "scan";
   $("path").disabled = busy;
   $("mode").disabled = busy;
+  $("groupby").disabled = busy;
   $("clean-cancel").hidden = runKind !== "clean";
   $("clean-cancel").disabled = runKind !== "clean";
   $("clean-controls-msg").textContent =
-    runKind === "clean" ? `Cleaning ${cleanPath}…` : "Hover a drive card, then click Clean.";
+    runKind === "clean"
+      ? t("clean.controlsBusy", { path: cleanPath })
+      : t("clean.controls");
+  $("stats-cancel").hidden = runKind !== "stats";
+  $("stats-cancel").disabled = runKind !== "stats";
+  $("stats-controls-msg").textContent =
+    runKind === "stats"
+      ? t("stats.controlsBusy", { path: statsPath })
+      : t("stats.controls");
   $("dupes-cancel").hidden = runKind !== "dupes";
   $("dupes-cancel").disabled = runKind !== "dupes";
   $("dupes-minsize").disabled = busy;
   $("dupes-keep").disabled = busy;
   $("dupes-controls-msg").textContent =
-    runKind === "dupes" ? `Finding duplicates on ${dupPath}…` : "Hover a drive card, then click Find duplicates.";
+    runKind === "dupes"
+      ? t("dupes.controlsBusy", { path: dupPath })
+      : t("dupes.controls");
   document.querySelectorAll(".drive-card").forEach((c) => {
     if (!c.classList.contains("offline")) c.disabled = busy;
   });
@@ -116,6 +155,15 @@ function setUi() {
       ov.innerHTML = on
         ? '<span class="spin spin-lg"></span><span class="sr-only">Cleaning</span>'
         : CLEAN_IMG;
+  });
+  document.querySelectorAll("#stats-volumes .drive-card").forEach((c) => {
+    const on = c.classList.contains("active") && runKind === "stats";
+    c.classList.toggle("cleaning", on);
+    const ov = c.querySelector(".drive-overlay-btn");
+    if (ov)
+      ov.innerHTML = on
+        ? '<span class="spin spin-lg"></span><span class="sr-only">Analyzing</span>'
+        : STATS_IMG;
   });
   document.querySelectorAll("#dupes-volumes .drive-card").forEach((c) => {
     const on = c.classList.contains("active") && runKind === "dupes";
@@ -129,6 +177,7 @@ function setUi() {
   $("bar").classList.toggle("indeterminate", runKind === "scan");
   $("clean-bar").classList.toggle("indeterminate", runKind === "clean");
   $("dupes-bar").classList.toggle("indeterminate", runKind === "dupes");
+  $("stats-bar").classList.toggle("indeterminate", runKind === "stats");
   renderCleanActions();
   renderDupActions();
 }
@@ -137,13 +186,13 @@ function setUi() {
 
 function renderScanStats(p, cancelled) {
   const elapsed = p.elapsed_ms / 1000;
-  $("s-elapsed").textContent = `${elapsed.toFixed(2)} s${cancelled ? " (cancelled)" : ""}`;
+  $("s-elapsed").textContent = `${elapsed.toFixed(2)} s${cancelled ? t("status.cancelledTag") : ""}`;
   $("s-files").textContent = p.files.toLocaleString();
   $("s-dirs").textContent = p.dirs.toLocaleString();
   $("s-bytes").textContent = human(p.bytes);
   $("s-rate").textContent = humanRate((p.files + p.dirs) / Math.max(elapsed, 0.001));
   const skip = p.denied + p.not_found + p.errors + p.reparse_skipped;
-  $("s-skip").textContent = skip === 0 ? "none" : `${skip}`;
+  $("s-skip").textContent = skip === 0 ? t("stat.none") : `${skip}`;
 }
 
 function renderCleanStats(p) {
@@ -171,15 +220,16 @@ const ICONS = {
 
 const CLEAN_IMG = '<img class="clean-img" src="clean.png" alt="Clean" draggable="false" />';
 const DUP_IMG =
-  '<svg class="dup-img" viewBox="0 0 24 24" aria-hidden="true">' +
-  '<rect x="3" y="3" width="13" height="13" rx="2.6"/>' +
-  '<rect x="8" y="8" width="13" height="13" rx="2.6"/></svg>';
+  '<img class="clean-img" src="duplicates.png" alt="Find duplicates" draggable="false" />';
+
+const STATS_IMG =
+  '<img class="clean-img" src="statistics.png" alt="Analyze" draggable="false" />';
 
 /**
  * One scrollable, windowed list backed by a paged Tauri command.
  * Only the rows inside the viewport exist in the DOM.
  */
-function createList({ viewportId, canvasId, windowId, countId, fetchPage, rowHtml, emptyText }) {
+function createList({ viewportId, canvasId, windowId, countId, fetchPage, rowHtml, emptyText, countLabel: countLabelFn }) {
   const viewport = $(viewportId);
   const canvas = $(canvasId);
   const rowWindow = $(windowId);
@@ -203,10 +253,17 @@ function createList({ viewportId, canvasId, windowId, countId, fetchPage, rowHtm
 
   function countLabel() {
     if (listTotal === 0) return "";
-    if (listTotal > totalRows) {
-      return `${totalRows.toLocaleString()} largest of ${listTotal.toLocaleString()} files`;
+    if (countLabelFn) {
+      const custom = countLabelFn(listTotal, totalRows);
+      if (custom != null) return custom;
     }
-    return `${listTotal.toLocaleString()} files (largest first)`;
+    if (listTotal > totalRows) {
+      return t("list.filesLargestOf", {
+        shown: totalRows.toLocaleString(),
+        total: listTotal.toLocaleString(),
+      });
+    }
+    return t("list.filesLargest", { n: listTotal.toLocaleString() });
   }
 
   function reset(total, keepScroll) {
@@ -294,29 +351,149 @@ function fileRowHtml(entry, maxSize) {
     `<span class="row-path" title="${path}">${escapeHtml(dirName(entry.path))}</span>` +
     `</div>` +
     `<span class="row-size">${human(entry.size)}</span>` +
-    `<span class="row-pct">${pctText(entry, maxSize)}%</span>` +
     `<span class="row-actions">` +
-    `<button class="icon-btn" data-act="info" title="More info" aria-label="More info">${ICONS.info}</button>` +
-    `<button class="icon-btn" data-act="open" title="Open location" aria-label="Open location">${ICONS.open}</button>` +
-    `<button class="icon-btn" data-act="trash" title="Move to trash" aria-label="Move to trash">${ICONS.trash}</button>` +
-    `<button class="icon-btn danger" data-act="delete" title="Delete permanently" aria-label="Delete permanently">${ICONS.del}</button>` +
+    `<button class="icon-btn" data-act="info" title="${t("row.moreInfo")}" aria-label="${t("row.moreInfo")}">${ICONS.info}</button>` +
+    `<button class="icon-btn" data-act="open" title="${t("row.openLocation")}" aria-label="${t("row.openLocation")}">${ICONS.open}</button>` +
+    `<button class="icon-btn" data-act="trash" title="${t("row.trash")}" aria-label="${t("row.trash")}">${ICONS.trash}</button>` +
+    `<button class="icon-btn danger" data-act="delete" title="${t("row.delete")}" aria-label="${t("row.delete")}">${ICONS.del}</button>` +
     `</div></div>`
   );
 }
+
+// The Explorer list shows individual files or rolled-up folders; the paged
+// backend command it calls is chosen at fetch time.
+let explorerMode = "files"; // "files" | "folders"
 
 const filesList = createList({
   viewportId: "list-viewport",
   canvasId: "list-canvas",
   windowId: "list-window",
   countId: "file-count",
-  fetchPage: (offset, limit) => invoke("get_files", { offset, limit }),
-  rowHtml: fileRowHtml,
-  emptyText: () => "No scan yet.",
+  fetchPage: (offset, limit) =>
+    explorerMode === "folders"
+      ? invoke("get_folders", { offset, limit })
+      : invoke("get_files", { offset, limit }),
+  rowHtml: (entry, maxSize) =>
+    explorerMode === "folders" ? folderRowHtml(entry, maxSize) : fileRowHtml(entry, maxSize),
+  emptyText: () =>
+    explorerMode === "folders" ? t("explorer.emptyFolders") : t("explorer.emptyFiles"),
+  countLabel: (total, shown) =>
+    explorerMode !== "folders"
+      ? null
+      : shown < total
+      ? t("list.foldersLargestOf", { shown: shown.toLocaleString(), total: total.toLocaleString() })
+      : t("list.foldersLargest", { n: total.toLocaleString() }),
 });
+
+// Same row shape as a file, but the entry is a folder: recursive size, the
+// number of files inside it, and only an "open location" action.
+function folderRowHtml(entry, maxSize) {
+  const path = escapeHtml(entry.path);
+  const name = baseName(entry.path) || entry.path;
+  const parent = name === entry.path ? "" : dirName(entry.path);
+  const pct = maxSize > 0 ? (entry.size / maxSize) * 100 : 0;
+  return (
+    `<div class="list-row folder-row" data-path="${path}" data-size="${entry.size}">` +
+    `<div class="row-fill" style="width:${Math.max(pct, 0.15).toFixed(3)}%;--fill-edge:${fillColor(pct)}"></div>` +
+    `<div class="row-inner">` +
+    `<div class="row-main">` +
+    `<span class="row-name" title="${path}">${escapeHtml(name)}</span>` +
+    `<span class="row-path" title="${path}">${escapeHtml(parent)}</span>` +
+    `</div>` +
+    `<span class="row-size">${human(entry.size)}</span>` +
+    `<span class="row-count">${entry.files.toLocaleString()}</span>` +
+    `<span class="row-actions">` +
+    `<button class="icon-btn" data-act="open" title="${t("row.openLocation")}" aria-label="${t("row.openLocation")}">${ICONS.open}</button>` +
+    `</span></div>`
+  );
+}
+
+// Re-page the Explorer list for the current mode without running a new scan.
+async function refreshExplorerList() {
+  try {
+    const p =
+      explorerMode === "folders"
+        ? await invoke("get_folders", { offset: 0, limit: 1 })
+        : await invoke("get_files", { offset: 0, limit: 1 });
+    filesList.reset(p.total);
+    await filesList.refreshMax();
+    filesList.render();
+  } catch (e) {
+    setStatus(t("status.error", { e }));
+  }
+}
+
+// Live-fill the Explorer while a scan runs: the backend streams the largest
+// files found so far, so we re-page the list on a throttled timer (~2.5/s)
+// instead of leaving it empty until the scan finishes. Skipped when the
+// Explorer tab is hidden or a re-page is already in flight.
+let streamAt = 0;
+let streamBusy = false;
+async function streamExplorer() {
+  const now = performance.now();
+  if (streamBusy || now - streamAt < 400) return;
+  if (!$("page-explorer").classList.contains("active")) return;
+  streamBusy = true;
+  streamAt = now;
+  try {
+    const p =
+      explorerMode === "folders"
+        ? await invoke("get_folders", { offset: 0, limit: 1 })
+        : await invoke("get_files", { offset: 0, limit: 1 });
+    if (runKind !== "scan") return;
+    filesList.reset(p.total);
+    await filesList.refreshMax();
+    filesList.render();
+  } catch {
+    /* keep whatever is on screen */
+  } finally {
+    streamBusy = false;
+  }
+}
+
+// Live Clean streaming: while the backend walk classifies junk, re-page the
+// junk list so rows appear as they are found. Throttled to ~600 ms to match
+// the backend's classification ticker; skipped when the page is hidden.
+let cleanStreamAt = 0;
+let cleanStreamBusy = false;
+async function streamClean() {
+  const now = performance.now();
+  if (cleanStreamBusy || now - cleanStreamAt < 500) return;
+  if (!$("page-clean").classList.contains("active")) return;
+  cleanStreamBusy = true;
+  cleanStreamAt = now;
+  try {
+    const probe = await invoke("get_junk", { offset: 0, limit: 1, category: null });
+    if (runKind !== "clean") return;
+    $("c-files").textContent = (cleanAgg.safeFiles + cleanAgg.optFiles).toLocaleString();
+    $("c-bytes").textContent = human(Math.max(cleanAgg.safeBytes + cleanAgg.optBytes, 0));
+    if (probe.total !== junkList.total) {
+      junkList.reset(probe.total, true);
+    } else {
+      junkList.render();
+    }
+  } catch {
+    /* keep whatever is on screen */
+  } finally {
+    cleanStreamBusy = false;
+  }
+}
+
+function setExplorerMode(mode) {
+  if (mode === explorerMode) return;
+  explorerMode = mode;
+  const folder = mode === "folders";
+  $("explorer-title").textContent = folder ? t("explorer.allFolders") : t("explorer.allFiles");
+  document.querySelector("#page-explorer .list-head").classList.toggle("with-count", folder);
+  document.querySelector("#page-explorer .col-count").hidden = !folder;
+  if (runKind !== "scan") refreshExplorerList();
+}
+
+$("groupby").onchange = () => setExplorerMode($("groupby").value);
 
 /* ---------- clean list ---------- */
 
-let junkEmptyText = "Run a clean sweep to list junk files.";
+let junkEmptyNoMatch = false;
 
 // Plain-language explanation for each junk rule, shown as a hover tooltip on
 // the reason badge so it is clear *why* a file is offered and that it is safe.
@@ -346,6 +523,18 @@ const JUNK_WHY = {
   "dev-cache": "Developer package caches (npm/pip/Cargo/NuGet/Gradle/Maven/Go). Re-downloaded on next build.",
 };
 
+function junkLabel(entry) {
+  const key = "junk." + entry.rule;
+  const s = t(key);
+  return s === key ? entry.label : s;
+}
+
+function junkWhy(entry) {
+  const key = "junk.why." + entry.rule;
+  const s = t(key);
+  return s === key ? JUNK_WHY[entry.rule] || entry.label : s;
+}
+
 function junkRowHtml(entry, maxSize) {
   const path = escapeHtml(entry.path);
   const selected = isJunkSelected(entry);
@@ -366,12 +555,12 @@ function junkRowHtml(entry, maxSize) {
     `<span class="row-path" title="${path}">${escapeHtml(dirName(entry.path))}</span>` +
     `</div>` +
     `<span class="junk-badge ${entry.category}" title="${escapeHtml(
-      JUNK_WHY[entry.rule] || entry.label
-    )}">${escapeHtml(entry.label)}</span>` +
+      junkWhy(entry)
+    )}">${escapeHtml(junkLabel(entry))}</span>` +
     `<span class="row-size">${human(entry.size)}</span>` +
     `<span class="row-actions">` +
-    `<button class="icon-btn" data-act="info" title="More info" aria-label="More info">${ICONS.info}</button>` +
-    `<button class="icon-btn" data-act="open" title="Open location" aria-label="Open location">${ICONS.open}</button>` +
+    `<button class="icon-btn" data-act="info" title="${t("row.moreInfo")}" aria-label="${t("row.moreInfo")}">${ICONS.info}</button>` +
+    `<button class="icon-btn" data-act="open" title="${t("row.openLocation")}" aria-label="${t("row.openLocation")}">${ICONS.open}</button>` +
     `</span></div>`
   );
 }
@@ -381,9 +570,20 @@ const junkList = createList({
   canvasId: "clean-canvas",
   windowId: "clean-window",
   fetchPage: (offset, limit) =>
-    invoke("get_junk", { offset, limit, category: cleanFilter === "all" ? null : cleanFilter }),
+    invoke("get_junk", { offset, limit, category: cleanFilter === "all" ? null : cleanFilter }).then((p) => {
+      // The page response also carries whole-list category totals; harvesting
+      // them here keeps the summary/chips live while the walk streams junk in.
+      cleanAgg.safeFiles = p.safe_files;
+      cleanAgg.safeBytes = p.safe_bytes;
+      cleanAgg.optFiles = p.optional_files;
+      cleanAgg.optBytes = p.optional_bytes;
+      renderCleanSummary();
+      // Keep the whole page — `createList` picks `.entries` off it. Returning
+      // just the array here would break that (`array.entries` is a method).
+      return p;
+    }),
   rowHtml: junkRowHtml,
-  emptyText: () => junkEmptyText,
+  emptyText: () => t(junkEmptyNoMatch ? "clean.emptyNoMatch" : "clean.emptyDefault"),
 });
 
 // Totals per category, straight from the backend, so the default "safe"
@@ -426,9 +626,9 @@ function selectedTotals() {
 
 function renderChipCounts() {
   const total = cleanAgg.safeFiles + cleanAgg.optFiles;
-  $("clean-filter-all").textContent = `all ${total.toLocaleString()}`;
-  $("clean-filter-safe").textContent = `safe ${cleanAgg.safeFiles.toLocaleString()}`;
-  $("clean-filter-optional").textContent = `optional ${cleanAgg.optFiles.toLocaleString()}`;
+  $("clean-filter-all").textContent = `${t("clean.all")} ${total.toLocaleString()}`;
+  $("clean-filter-safe").textContent = `${t("clean.safe")} ${cleanAgg.safeFiles.toLocaleString()}`;
+  $("clean-filter-optional").textContent = `${t("clean.optional")} ${cleanAgg.optFiles.toLocaleString()}`;
 }
 
 function renderCleanActions() {
@@ -436,7 +636,9 @@ function renderCleanActions() {
   const size = Math.max(bytes, 0);
   const total = cleanAgg.safeFiles + cleanAgg.optFiles;
   $("c-selected").textContent =
-    count === 0 ? "none" : `${count.toLocaleString()} files · ${human(size)}`;
+    count === 0
+      ? t("clean.selectedNone")
+      : t("clean.selected", { count: count.toLocaleString(), size: human(size) });
   const zero = count === 0 || purging || runKind === "clean";
   $("clean-trash").disabled = zero;
   $("clean-perm").disabled = zero;
@@ -444,10 +646,14 @@ function renderCleanActions() {
   $("clean-all-btn").disabled = runKind === "clean";
   $("clean-hint").textContent =
     total === 0
-      ? "Nothing to clean."
+      ? t("clean.hintNothing")
       : count === 0
-      ? `Nothing selected of ${total.toLocaleString()} junk files.`
-      : `${count.toLocaleString()} of ${total.toLocaleString()} junk files selected · ${human(size)}.`;
+      ? t("clean.hintNone", { total: total.toLocaleString() })
+      : t("clean.hintSome", {
+          count: count.toLocaleString(),
+          total: total.toLocaleString(),
+          size: human(size),
+        });
 }
 
 function renderCleanSummary() {
@@ -456,6 +662,17 @@ function renderCleanSummary() {
 }
 
 /* ---------- drive cards ---------- */
+
+// Which drive the user picked on each page's card grid, kept across
+// refreshVolumes() rebuilding the cards after every scan.
+const gridSel = {};
+
+function markSelected(box, card) {
+  gridSel[box.id] = card ? card.dataset.letter || "" : "";
+  box
+    .querySelectorAll(".drive-card")
+    .forEach((c) => c.classList.toggle("selected", c === card));
+}
 
 function driveColor(pct) {
   if (pct >= 92) return ["#f2555a", "#ff8d90"];
@@ -493,18 +710,24 @@ function fillDriveCards(box, vols, opts) {
     btn.type = "button";
     btn.dataset.letter = v.letter;
     btn.disabled = runKind !== null;
-    btn.title = `${v.letter}: — ${human(used)} used, ${human(v.free)} free of ${human(v.total)}`;
+    btn.classList.toggle("selected", (gridSel[box.id] || "") === v.letter);
+    btn.title = t("drive.tooltip", {
+      letter: v.letter,
+      used: human(used),
+      free: human(v.free),
+      total: human(v.total),
+    });
     btn.innerHTML =
       donut(pct) +
       `<span class="drive-body">` +
       `<span class="drive-top"><span class="drive-letter">${v.letter}:</span>` +
       `<span class="drive-label">${escapeHtml(v.label || v.kind)}</span>` +
       `<span class="drive-fs">${escapeHtml(v.fs || "—")}</span></span>` +
-      `<span class="drive-line"><span>used <b>${human(used)}</b></span><span>free <b>${human(
-        v.free
-      )}</b></span></span>` +
-      `<span class="drive-line"><span>total ${human(v.total)}</span><span>${
-        v.kind === "fixed" ? "internal" : v.kind
+      `<span class="drive-line"><span>${t("drive.used")} <b>${human(used)}</b></span><span>${t(
+        "drive.free"
+      )} <b>${human(v.free)}</b></span></span>` +
+      `<span class="drive-line"><span>${t("drive.total")} ${human(v.total)}</span><span>${
+        v.kind === "fixed" ? t("drive.internal") : v.kind
       }</span></span>` +
       `<span class="drive-bar" style="--drive-color:${c1};--drive-color-2:${c2}"><span style="width:${pct.toFixed(
         1
@@ -519,7 +742,7 @@ function fillDriveCards(box, vols, opts) {
     btn.onclick = () => {
       if (opts.onPick) return opts.onPick(v, box, btn);
       $(opts.inputId).value = `${v.letter}:\\`;
-      box.querySelectorAll(".drive-card").forEach((c) => c.classList.toggle("picked", c === btn));
+      markSelected(box, btn);
     };
     box.appendChild(btn);
   }
@@ -527,7 +750,7 @@ function fillDriveCards(box, vols, opts) {
     const off = document.createElement("button");
     off.className = "drive-card offline";
     off.type = "button";
-    off.textContent = "no drives";
+    off.textContent = t("drive.noDrives");
     box.appendChild(off);
   }
 }
@@ -540,12 +763,16 @@ async function refreshVolumes() {
       overlayHtml: CLEAN_IMG,
       onPick: (v, box, card) => startClean(`${v.letter}:\\`, box, card),
     });
+    fillDriveCards($("stats-volumes"), vols, {
+      overlayHtml: STATS_IMG,
+      onPick: (v, box, card) => startStats(`${v.letter}:\\`, box, card),
+    });
     fillDriveCards($("dupes-volumes"), vols, {
       overlayHtml: DUP_IMG,
       onPick: (v, box, card) => startDupes(`${v.letter}:\\`, box, card),
     });
   } catch (e) {
-    setStatus(`volume list failed: ${e}`);
+    setStatus(t("status.volumeFail", { e }));
   }
 }
 
@@ -555,38 +782,120 @@ async function actionInfo(path, size, maxSize) {
   try {
     const info = await invoke("file_info", { path });
     const pct = maxSize > 0 ? ((info.size / maxSize) * 100).toFixed(2) : "—";
-    const fmt = (t) => (t ? new Date(t).toLocaleString() : "—");
-    $("info-title").textContent = "File information";
+    const fmt = (v) => (v ? new Date(v).toLocaleString(curLang()) : "—");
+    $("info-title").textContent = t("modal.info.title");
     $("info-body").innerHTML =
       `<div class="file-name">${escapeHtml(info.name)}</div>` +
       `<div class="file-path">${escapeHtml(info.path)}</div>` +
       `<dl class="info-grid">` +
-      `<dt>size</dt><dd>${human(info.size)} (${info.size.toLocaleString()} bytes)</dd>` +
-      `<dt>% of largest</dt><dd>${pct}%</dd>` +
-      `<dt>extension</dt><dd>${escapeHtml(info.extension || "—")}</dd>` +
-      `<dt>folder</dt><dd>${escapeHtml(info.parent)}</dd>` +
-      `<dt>modified</dt><dd>${fmt(info.modified_ms)}</dd>` +
-      `<dt>created</dt><dd>${fmt(info.created_ms)}</dd>` +
-      `<dt>accessed</dt><dd>${fmt(info.accessed_ms)}</dd>` +
+      `<dt>${t("info.size")}</dt><dd>${human(info.size)} (${t("info.bytes", {
+        n: info.size.toLocaleString(),
+      })})</dd>` +
+      `<dt>${t("info.pctLargest")}</dt><dd>${pct}%</dd>` +
+      `<dt>${t("info.extension")}</dt><dd>${escapeHtml(info.extension || "—")}</dd>` +
+      `<dt>${t("info.folder")}</dt><dd>${escapeHtml(info.parent)}</dd>` +
+      `<dt>${t("info.modified")}</dt><dd>${fmt(info.modified_ms)}</dd>` +
+      `<dt>${t("info.created")}</dt><dd>${fmt(info.created_ms)}</dd>` +
+      `<dt>${t("info.accessed")}</dt><dd>${fmt(info.accessed_ms)}</dd>` +
       `</dl>` +
       `<div class="info-tags">` +
-      `<span class="tag ${info.readonly ? "on" : ""}">read-only</span>` +
-      `<span class="tag ${info.hidden ? "on" : ""}">hidden</span>` +
-      `<span class="tag ${info.system ? "on" : ""}">system</span>` +
-      `<span class="tag ${info.archive ? "on" : ""}">archive</span>` +
-      `<span class="tag ${info.reparse ? "on" : ""}">reparse point</span>` +
+      `<span class="tag ${info.readonly ? "on" : ""}">${t("info.readonly")}</span>` +
+      `<span class="tag ${info.hidden ? "on" : ""}">${t("info.hidden")}</span>` +
+      `<span class="tag ${info.system ? "on" : ""}">${t("info.system")}</span>` +
+      `<span class="tag ${info.archive ? "on" : ""}">${t("info.archive")}</span>` +
+      `<span class="tag ${info.reparse ? "on" : ""}">${t("info.reparse")}</span>` +
       `</div>`;
     $("modal-info").dataset.path = path;
     $("modal-info").dataset.size = String(size);
     $("modal-info").hidden = false;
   } catch (e) {
-    toast(`cannot open info: ${e}`, "err");
+    toast(t("toast.infoFail", { e }), "err");
   }
 }
 
 function closeModals() {
   $("modal-info").hidden = true;
   $("modal-confirm").hidden = true;
+  $("modal-help").hidden = true;
+  $("modal-settings").hidden = true;
+  $("modal-about").hidden = true;
+  // The deleting modal is only closed when a purge finishes, never by a stray
+  // backdrop/Escape close.
+}
+
+/* ---------- live delete-progress modal ---------- */
+
+// Open the progress dialog before a bulk purge. It stays up (not dismissable
+// except via its own Cancel) until finishDelete() is called, so the user always
+// sees what is happening. `deletingStopping` guards against double-cancel.
+let deletingFreed = 0;
+let deletingStopping = false;
+
+function openDeleting(total) {
+  deletingFreed = 0;
+  deletingStopping = false;
+  $("deleting-title").textContent = t("deleting.title");
+  $("deleting-title").dataset.done = "";
+  $("deleting-deleted").textContent = "0";
+  $("deleting-total").textContent = total.toLocaleString();
+  $("deleting-freed").textContent = "";
+  $("deleting-current").textContent = "";
+  $("deleting-failed").hidden = true;
+  $("deleting-bar").style.width = "0%";
+  $("deleting-cancel").hidden = false;
+  $("deleting-cancel").disabled = false;
+  $("deleting-cancel").textContent = t("btn.cancel");
+  $("deleting-close").hidden = true;
+  $("modal-deleting").hidden = false;
+}
+
+// Update it from a `delete-progress` event.
+function updateDeleting(p) {
+  $("deleting-deleted").textContent = p.deleted.toLocaleString();
+  $("deleting-total").textContent = p.total.toLocaleString();
+  const pct = p.total > 0 ? Math.min(100, (p.processed / p.total) * 100) : 100;
+  $("deleting-bar").style.width = `${pct.toFixed(1)}%`;
+  if (p.freed != null) {
+    deletingFreed = p.freed;
+    $("deleting-freed").textContent = t("deleting.freed", { size: human(p.freed) });
+  }
+  const name = p.last ? baseName(p.last) : "";
+  $("deleting-current").textContent = name ? t("deleting.current", { name }) : "";
+  if (p.failed > 0) {
+    $("deleting-failed").textContent = t("deleting.failed", { n: p.failed.toLocaleString() });
+    $("deleting-failed").hidden = false;
+  }
+}
+
+// Mark the purge complete: full bar, a summary line, and a Close button.
+function finishDeleting(deleted, permanent, cancelled) {
+  $("deleting-bar").style.width = "100%";
+  $("deleting-title").textContent = cancelled ? t("deleting.titleCancelled") : t("deleting.titleDone");
+  $("deleting-freed").textContent = t("deleting.freed", { size: human(deletingFreed) });
+  $("deleting-current").textContent = permanent
+    ? t("deleting.donePerm", { n: deleted.toLocaleString() })
+    : t("deleting.doneTrash", { n: deleted.toLocaleString() });
+  $("deleting-cancel").hidden = true;
+  $("deleting-close").hidden = false;
+  $("deleting-close").focus();
+}
+
+function closeDeleting() {
+  $("modal-deleting").hidden = true;
+}
+
+// Cancel button: ask the backend to stop, then disable the button so a second
+// click can't spam the command. The modal stays up until the invoke returns.
+async function cancelDeleting() {
+  if (deletingStopping) return;
+  deletingStopping = true;
+  $("deleting-cancel").disabled = true;
+  $("deleting-cancel").textContent = t("deleting.stopping");
+  try {
+    await invoke("delete_cancel");
+  } catch (e) {
+    // ignore — the purge may already be done
+  }
 }
 
 function confirmDialog(title, text, okLabel) {
@@ -623,47 +932,49 @@ async function dropRows(paths) {
 async function actionTrash(path) {
   const name = baseName(path);
   const ok = await confirmDialog(
-    "Move to Recycle Bin?",
-    `${name}\n\nYou can restore it from the Recycle Bin later.`,
-    "Move to trash"
+    t("confirm.trashTitle"),
+    t("confirm.trashBody", { name }),
+    t("row.trash")
   );
   if (!ok) return;
+  setStatus(t("status.deleting", { name }));
   try {
     await invoke("move_to_trash", { path });
     dropRows([path]);
-    toast(`moved to Recycle Bin: ${name}`, "ok");
-    setStatus(`Moved to Recycle Bin: ${path}`);
+    toast(t("toast.moved", { name }), "ok");
+    setStatus(t("status.moved", { path }));
   } catch (e) {
-    toast(`trash failed: ${e}`, "err");
-    setStatus(`error: ${e}`);
+    toast(t("toast.trashFail", { e }), "err");
+    setStatus(t("status.error", { e }));
   }
 }
 
 async function actionDelete(path) {
   const name = baseName(path);
   const ok = await confirmDialog(
-    "Delete permanently?",
-    `${name}\n\nThis bypasses the Recycle Bin. The file cannot be recovered.`,
-    "Delete permanently"
+    t("confirm.deleteTitle"),
+    t("confirm.deleteBody", { name }),
+    t("btn.deletePerm")
   );
   if (!ok) return;
+  setStatus(t("status.deleting", { name }));
   try {
     await invoke("delete_permanent", { path });
     dropRows([path]);
-    toast(`deleted permanently: ${name}`, "ok");
-    setStatus(`Deleted permanently: ${path}`);
+    toast(t("toast.deleted", { name }), "ok");
+    setStatus(t("status.deleted", { path }));
   } catch (e) {
-    toast(`delete failed: ${e}`, "err");
-    setStatus(`error: ${e}`);
+    toast(t("toast.deleteFail", { e }), "err");
+    setStatus(t("status.error", { e }));
   }
 }
 
 async function actionOpen(path) {
   try {
     await invoke("open_location", { path });
-    toast(`opened location of ${baseName(path)}`, "ok");
+    toast(t("toast.opened", { name: baseName(path) }), "ok");
   } catch (e) {
-    toast(`cannot open location: ${e}`, "err");
+    toast(t("toast.openFail", { e }), "err");
   }
 }
 
@@ -693,7 +1004,9 @@ filesList.window.addEventListener("click", (e) => {
 
 filesList.window.addEventListener("dblclick", (e) => {
   const row = e.target.closest(".list-row");
-  if (row) actionInfo(row.dataset.path, Number(row.dataset.size || 0), filesList.max);
+  if (!row) return;
+  if (row.classList.contains("folder-row")) actionOpen(row.dataset.path);
+  else actionInfo(row.dataset.path, Number(row.dataset.size || 0), filesList.max);
 });
 
 /* ---------- clean page interactions ---------- */
@@ -753,7 +1066,7 @@ async function applyFilter(name) {
     await junkList.refreshMax();
     junkList.render();
   } catch (e) {
-    cleanStatus(`error: ${e}`);
+    cleanStatus(t("status.error", { e }));
   }
   renderCleanActions();
 }
@@ -786,19 +1099,25 @@ $("clean-check-all").onclick = () => {
 async function runPurge(permanent) {
   const { count, bytes } = selectedTotals();
   if (count === 0 || purging) return;
+  const countLabel = `${count.toLocaleString()} ${
+    count === 1 ? t("unit.file") : t("unit.files")
+  }`;
   const ok = await confirmDialog(
-    permanent ? "Delete permanently?" : "Move to Recycle Bin?",
-    `${count.toLocaleString()} file${count === 1 ? "" : "s"}, ${human(Math.max(bytes, 0))}.\n\n` +
-      (permanent
-        ? "This bypasses the Recycle Bin and cannot be undone."
-        : "Restorable from the Recycle Bin afterwards. Windows deletes items that are too big for the Recycle Bin structure permanently."),
-    permanent ? "Delete permanently" : "Move to trash"
+    permanent ? t("confirm.deleteTitle") : t("confirm.trashTitle"),
+    t("confirm.cleanBody", {
+      count: countLabel,
+      size: human(Math.max(bytes, 0)),
+      note: permanent ? t("confirm.permNote") : t("confirm.cleanTrashNote"),
+    }),
+    permanent ? t("btn.deletePerm") : t("row.trash")
   );
   if (!ok) return;
 
   purging = true;
   renderCleanActions();
   const invert = Array.from(cleanSel.overrides, ([path, o]) => ({ path, on: o.on }));
+  cleanStatus(t("clean.deleting", { done: 0, total: count.toLocaleString() }));
+  openDeleting(count);
   try {
     const res = await invoke("purge_selected", {
       kind: cleanSel.mode,
@@ -815,20 +1134,25 @@ async function runPurge(permanent) {
     await junkList.refreshMax();
     junkList.render();
     renderCleanSummary();
-    const verb = permanent ? "Deleted permanently" : "Moved to Recycle Bin";
+    const verb = permanent ? t("clean.deleted") : t("clean.trashed");
     const failedNote = res.failed.length
-      ? ` ${res.failed.length} could not be removed (in use or access denied).`
+      ? t("clean.failedNote", { n: res.failed.length })
       : "";
     cleanStatus(
-      `${verb}: ${res.deleted.toLocaleString()} file${res.deleted === 1 ? "" : "s"}, ${human(
-        Math.max(bytes, 0)
-      )}.${failedNote}`
+      t("clean.result", {
+        verb,
+        deleted: res.deleted.toLocaleString(),
+        size: human(Math.max(bytes, 0)),
+        failed: failedNote,
+      })
     );
-    toast(`${verb.toLowerCase()}: ${res.deleted.toLocaleString()} files`, res.failed.length ? "warn" : "ok");
+    toast(t("toast.purged", { verb: verb.toLowerCase(), n: res.deleted.toLocaleString() }), res.failed.length ? "warn" : "ok");
+    finishDeleting(res.deleted, permanent, res.cancelled);
     refreshVolumes();
   } catch (e) {
-    cleanStatus(`error: ${e}`);
-    toast(`clean failed: ${e}`, "err");
+    closeDeleting();
+    cleanStatus(t("status.error", { e }));
+    toast(t("toast.cleanFail", { e }), "err");
   } finally {
     purging = false;
     renderCleanActions();
@@ -843,10 +1167,11 @@ async function startClean(path, box, card) {
   cleanPath = path;
   if (box) {
     box.querySelectorAll(".drive-card").forEach((c) => c.classList.toggle("active", c === card));
+    if (card) markSelected(box, card);
   }
   runKind = "clean";
   setUi();
-  junkEmptyText = "Nothing to clean here — no junk matched.";
+  junkEmptyNoMatch = true;
   cleanAgg.safeFiles = 0;
   cleanAgg.safeBytes = 0;
   cleanAgg.optFiles = 0;
@@ -863,7 +1188,7 @@ async function startClean(path, box, card) {
   $("c-selected").textContent = "—";
   junkList.reset(0);
   renderCleanSummary();
-  cleanStatus(`Scanning ${path} for junk…`);
+  cleanStatus(t("clean.scanning", { path }));
   try {
     await invoke("clean_start", {
       path,
@@ -873,14 +1198,14 @@ async function startClean(path, box, card) {
   } catch (e) {
     runKind = null;
     setUi();
-    cleanStatus(`error: ${e}`);
+    cleanStatus(t("status.error", { e }));
   }
 }
 
 $("clean-cancel").onclick = () => {
   invoke("scan_cancel")
-    .then(() => cleanStatus("Cancelling — finishing current folder…"))
-    .catch((e) => cleanStatus(`cancel: ${e}`));
+    .then(() => cleanStatus(t("status.cancelling")))
+    .catch((e) => cleanStatus(t("status.cancel", { e })));
 };
 
 /* ---------- duplicates page ---------- */
@@ -900,7 +1225,7 @@ function dupStatus(msg) {
 }
 
 function fmtDate(ms) {
-  return ms ? new Date(ms).toLocaleDateString() : "—";
+  return ms ? new Date(ms).toLocaleDateString(curLang()) : "—";
 }
 
 function dupIsDeleted(f) {
@@ -933,11 +1258,11 @@ function dupFileHtml(g, f) {
   const del = dupIsDeleted(f);
   return (
     `<div class="dup-file ${del ? "del" : "keep"}" data-path="${escapeHtml(f.path)}" data-gid="${g.id}">` +
-    `<input type="checkbox" class="row-check" data-act="pick" ${del ? "checked" : ""} title="Tick to delete this copy" />` +
-    `<button type="button" class="dup-star" data-act="keep" title="Keep only this copy" aria-label="Keep only this copy">★</button>` +
+    `<input type="checkbox" class="row-check" data-act="pick" ${del ? "checked" : ""} title="${t("dupes.pickTitle")}" />` +
+    `<button type="button" class="dup-star" data-act="keep" title="${t("dupes.starTitle")}" aria-label="${t("dupes.starTitle")}">★</button>` +
     `<span class="dup-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</span>` +
     `<span class="dup-when">${fmtDate(f.mtime_ms)}</span>` +
-    `<span class="dup-tag">${del ? "delete" : "keep"}</span>` +
+    `<span class="dup-tag">${del ? t("dupes.tagDelete") : t("dupes.tagKeep")}</span>` +
     `</div>`
   );
 }
@@ -948,7 +1273,11 @@ function dupGroupHtml(g) {
     `<div class="dup-group" data-gid="${g.id}">` +
     `<div class="dup-head">` +
     `<span class="dup-name" title="${escapeHtml(g.files[0].path)}">${escapeHtml(g.name)}</span>` +
-    `<span class="dup-meta">${g.files.length} copies · ${human(g.size)} each · ${human(wasted)} reclaimable</span>` +
+    `<span class="dup-meta">${t("dupes.groupMeta", {
+      n: g.files.length,
+      size: human(g.size),
+      wasted: human(wasted),
+    })}</span>` +
     `</div>` +
     `<div class="dup-files">${g.files.map((f) => dupFileHtml(g, f)).join("")}</div>` +
     `</div>`
@@ -959,7 +1288,7 @@ function paintDupRow(row, del) {
   row.classList.toggle("del", del);
   row.classList.toggle("keep", !del);
   const tag = row.querySelector(".dup-tag");
-  if (tag) tag.textContent = del ? "delete" : "keep";
+  if (tag) tag.textContent = del ? t("dupes.tagDelete") : t("dupes.tagKeep");
 }
 
 function updateGroupDom(g) {
@@ -979,7 +1308,10 @@ function updateGroupDom(g) {
 function renderDupActions() {
   const { count, bytes } = dupSelectedTotals();
   const busy = runKind === "dupes";
-  $("d-selected").textContent = count === 0 ? "none" : `${count.toLocaleString()} files · ${human(bytes)}`;
+  $("d-selected").textContent =
+    count === 0
+      ? t("clean.selectedNone")
+      : t("clean.selected", { count: count.toLocaleString(), size: human(bytes) });
   const zero = count === 0 || dupPurging || busy;
   $("dupes-trash").disabled = zero;
   $("dupes-perm").disabled = zero;
@@ -989,19 +1321,25 @@ function renderDupActions() {
   const total = dupAgg.files;
   $("dupes-hint").textContent =
     total === 0
-      ? "No duplicates listed."
+      ? t("dupes.hintEmpty")
       : count === 0
-      ? `Nothing selected — every copy of ${dupAgg.groups.toLocaleString()} groups is being kept.`
-      : `${count.toLocaleString()} of ${total.toLocaleString()} copies selected · ${human(bytes)}. One copy per group is always kept.`;
+      ? t("dupes.hintNone", { groups: dupAgg.groups.toLocaleString() })
+      : t("dupes.hintSome", {
+          count: count.toLocaleString(),
+          total: total.toLocaleString(),
+          size: human(bytes),
+        });
 }
 
 function renderDupSummary() {
   $("dupes-summary").textContent =
     dupAgg.groups === 0
       ? ""
-      : `${dupAgg.groups.toLocaleString()} groups · ${dupAgg.files.toLocaleString()} copies · ${human(
-          dupAgg.wasted
-        )} reclaimable`;
+      : t("dupes.summary", {
+          groups: dupAgg.groups.toLocaleString(),
+          files: dupAgg.files.toLocaleString(),
+          wasted: human(dupAgg.wasted),
+        });
   $("d-groups").textContent = dupAgg.groups.toLocaleString();
   $("d-files").textContent = dupAgg.files.toLocaleString();
   $("d-wasted").textContent = human(dupAgg.wasted);
@@ -1018,7 +1356,7 @@ async function loadDupes(reset) {
   try {
     page = await invoke("get_dupes", { offset: dupGroups.length, limit: DUP_PAGE, keep: dupSel.keep });
   } catch (e) {
-    dupStatus(`error: ${e}`);
+    dupStatus(t("status.error", { e }));
     return;
   }
   dupTotal = page.total;
@@ -1037,15 +1375,45 @@ async function loadDupes(reset) {
   if (reset) list.innerHTML = "";
   if (page.entries.length) list.insertAdjacentHTML("beforeend", page.entries.map(dupGroupHtml).join(""));
   if (reset && dupGroups.length === 0)
-    list.innerHTML = `<div class="list-empty">No duplicates at this size floor.</div>`;
+    list.innerHTML = `<div class="list-empty">${t("dupes.emptyList")}</div>`;
   renderDupSummary();
+  renderDupActions();
+}
+
+// Live-remove copies reported by `delete-progress` from the visible groups so
+// the Duplicates list shrinks while the purge runs. Groups that fall below two
+// copies are dropped (they are no longer duplicates).
+function applyDupRemoved(paths) {
+  if (!paths || !paths.length) return;
+  const gone = new Set(paths);
+  let changed = false;
+  for (const g of dupGroups) {
+    const before = g.files.length;
+    g.files = g.files.filter((f) => !gone.has(f.path));
+    if (g.files.length !== before) changed = true;
+  }
+  const kept = dupGroups.filter((g) => g.files.length >= 2);
+  if (kept.length !== dupGroups.length) {
+    changed = true;
+    dupGroups = kept;
+    dupById.clear();
+    for (const g of dupGroups) dupById.set(g.id, g);
+  }
+  if (!changed) return;
+  const list = $("dupes-list");
+  list.innerHTML = "";
+  if (dupGroups.length) list.innerHTML = dupGroups.map(dupGroupHtml).join("");
+  else list.innerHTML = `<div class="list-empty">${t("dupes.emptyList")}</div>`;
   renderDupActions();
 }
 
 async function startDupes(path, box, card) {
   if (runKind !== null) return;
   dupPath = path;
-  if (box) box.querySelectorAll(".drive-card").forEach((c) => c.classList.toggle("active", c === card));
+  if (box) {
+    box.querySelectorAll(".drive-card").forEach((c) => c.classList.toggle("active", c === card));
+    if (card) markSelected(box, card);
+  }
   runKind = "dupes";
   dupGroups = [];
   dupById.clear();
@@ -1059,7 +1427,7 @@ async function startDupes(path, box, card) {
   });
   $("dupes-summary").textContent = "";
   setUi();
-  dupStatus(`Scanning ${path}, then reading shared-size files for duplicates…`);
+  dupStatus(t("dupes.scanning", { path }));
   try {
     await invoke("dupes_start", {
       path,
@@ -1070,43 +1438,55 @@ async function startDupes(path, box, card) {
   } catch (e) {
     runKind = null;
     setUi();
-    dupStatus(`error: ${e}`);
+    dupStatus(t("status.error", { e }));
   }
 }
 
 async function runDupPurge(permanent) {
   const { count, bytes } = dupSelectedTotals();
   if (count === 0 || dupPurging) return;
+  const countLabel = `${count.toLocaleString()} ${
+    count === 1 ? t("unit.copy") : t("unit.copies")
+  }`;
   const ok = await confirmDialog(
-    permanent ? "Delete permanently?" : "Move to Recycle Bin?",
-    `${count.toLocaleString()} duplicate cop${count === 1 ? "y" : "ies"} · ${human(bytes)}.\n\n` +
-      `One copy of each group is always kept. ` +
-      (permanent
-        ? "This bypasses the Recycle Bin; the files cannot be recovered."
-        : "Files go to the Recycle Bin. Very large ones may be deleted permanently instead."),
-    permanent ? "Delete permanently" : "Move to Recycle Bin"
+    permanent ? t("confirm.deleteTitle") : t("confirm.trashTitle"),
+    t("confirm.dupBody", {
+      count: countLabel,
+      size: human(bytes),
+      note: permanent ? t("confirm.dupPermNote") : t("confirm.dupTrashNote"),
+    }),
+    permanent ? t("btn.deletePerm") : t("btn.toRecycle")
   );
   if (!ok) return;
   dupPurging = true;
   renderDupActions();
   const invert = [...dupSel.overrides].map(([path, o]) => ({ path, on: o.on }));
+  dupStatus(t("clean.deleting", { done: 0, total: count.toLocaleString() }));
+  openDeleting(count);
   try {
     const res = await invoke("delete_dupes", { keep: dupSel.keep, invert, permanent });
     await loadDupes(true);
-    const verb = permanent ? "Deleted permanently" : "Moved to Recycle Bin";
+    const verb = permanent ? t("clean.deleted") : t("clean.trashed");
     const failedNote = res.failed.length
-      ? ` ${res.failed.length} could not be removed (in use or access denied).`
+      ? t("clean.failedNote", { n: res.failed.length })
       : "";
     dupStatus(
-      `${verb}: ${res.deleted.toLocaleString()} file${res.deleted === 1 ? "" : "s"}, ${human(
-        Math.max(bytes, 0)
-      )}. ${res.remaining_groups.toLocaleString()} groups left (${human(res.wasted)} reclaimable).${failedNote}`
+      t("dupes.result", {
+        verb,
+        deleted: res.deleted.toLocaleString(),
+        size: human(Math.max(bytes, 0)),
+        groups: res.remaining_groups.toLocaleString(),
+        wasted: human(res.wasted),
+        failed: failedNote,
+      })
     );
-    toast(`${verb.toLowerCase()}: ${res.deleted.toLocaleString()} files`, res.failed.length ? "warn" : "ok");
+    toast(t("toast.purged", { verb: verb.toLowerCase(), n: res.deleted.toLocaleString() }), res.failed.length ? "warn" : "ok");
+    finishDeleting(res.deleted, permanent, res.cancelled);
     refreshVolumes();
   } catch (e) {
-    dupStatus(`error: ${e}`);
-    toast(`delete failed: ${e}`, "err");
+    closeDeleting();
+    dupStatus(t("status.error", { e }));
+    toast(t("toast.deleteFail", { e }), "err");
   } finally {
     dupPurging = false;
     renderDupActions();
@@ -1175,8 +1555,8 @@ $("dupes-none").onclick = () => {
 $("dupes-more").onclick = () => loadDupes(false);
 $("dupes-cancel").onclick = () => {
   invoke("scan_cancel")
-    .then(() => dupStatus("Cancelling — finishing current file…"))
-    .catch((e) => dupStatus(`cancel: ${e}`));
+    .then(() => dupStatus(t("dupes.cancel")))
+    .catch((e) => dupStatus(t("status.cancel", { e })));
 };
 $("dupes-trash").onclick = () => runDupPurge(false);
 $("dupes-perm").onclick = () => runDupPurge(true);
@@ -1185,7 +1565,250 @@ $("dupes-keep").onchange = () => {
   if (dupAgg.groups > 0 || dupGroups.length) loadDupes(true);
 };
 
+/* ---------- statistics page ---------- */
+
+const STATS_COLORS = {
+  Images: "#60a5fa",
+  Videos: "#f472b6",
+  Audio: "#fbbf24",
+  Documents: "#34d399",
+  Archives: "#a78bfa",
+  Executables: "#f87171",
+  Code: "#22d3ee",
+  Other: "#9ca3af",
+};
+
+function statsColor(name) {
+  return STATS_COLORS[name] || "#9ca3af";
+}
+
+function bucketName(name) {
+  const key = "bucket." + name.toLowerCase();
+  const s = t(key);
+  return s === key ? name : s;
+}
+function statsStatus(msg) {
+  $("stats-status").textContent = msg;
+}
+
+function resetStatsView() {
+  ["t-scanned", "t-elapsed", "t-files", "t-bytes", "t-cats", "t-largest"].forEach(
+    (id) => ($(id).textContent = "—")
+  );
+  $("stats-view-total").textContent = t("stats.subtitle");
+  $("stats-bar").style.width = "0%";
+  $("type-chart").hidden = true;
+  $("type-chart").innerHTML = "";
+  $("type-legend").hidden = true;
+  $("type-legend").innerHTML = "";
+}
+
+function renderTypeStats(d) {
+  const buckets = [...d.buckets].sort((a, b) => b.bytes - a.bytes);
+  const totalBytes = buckets.reduce((a, b) => a + b.bytes, 0);
+  const largest = buckets[0];
+
+  $("t-scanned").textContent = `${d.letter}:\\`;
+  $("t-files").textContent = d.files.toLocaleString();
+  $("t-bytes").textContent = human(totalBytes);
+  $("t-cats").textContent = buckets.length.toLocaleString();
+  $("t-largest").textContent = largest
+    ? t("stats.largest", { name: bucketName(largest.name), size: human(largest.bytes) })
+    : "—";
+  $("stats-view-total").textContent = largest
+    ? t("stats.viewTotal", {
+        pct: ((largest.bytes / Math.max(totalBytes, 1)) * 100).toFixed(1),
+        name: bucketName(largest.name),
+        size: human(totalBytes),
+      })
+    : t("stats.noFiles");
+
+  const chart = $("type-chart");
+  chart.innerHTML = "";
+  chart.hidden = buckets.length === 0;
+  for (const b of buckets) {
+    const pct = totalBytes > 0 ? (b.bytes / totalBytes) * 100 : 0;
+    const seg = document.createElement("div");
+    seg.className = "type-seg";
+    seg.style.width = `${pct}%`;
+    seg.style.setProperty("--seg-color", statsColor(b.name));
+    seg.title = t("stats.chartTitle", {
+      name: bucketName(b.name),
+      size: human(b.bytes),
+      pct: pct.toFixed(1),
+    });
+    chart.appendChild(seg);
+  }
+
+  const legend = $("type-legend");
+  legend.innerHTML = "";
+  legend.hidden = buckets.length === 0;
+  const maxBytes = largest ? largest.bytes : 0;
+  const diskTotal = Number(d.total) || 0;
+  for (const b of buckets) {
+    const scannedPct = totalBytes > 0 ? (b.bytes / totalBytes) * 100 : 0;
+    const diskPct = diskTotal > 0 ? (b.bytes / diskTotal) * 100 : scannedPct;
+    const barW =
+      diskTotal > 0
+        ? Math.min(100, (b.bytes / diskTotal) * 100)
+        : maxBytes > 0
+        ? (b.bytes / maxBytes) * 100
+        : 0;
+    const color = statsColor(b.name);
+    const row = document.createElement("div");
+    row.className = "type-row";
+    row.title =
+      diskTotal > 0
+        ? t("stats.rowTitleDisk", {
+            name: bucketName(b.name),
+            size: human(b.bytes),
+            pct: diskPct.toFixed(2),
+            disk: human(diskTotal),
+          })
+        : t("stats.rowTitleScanned", {
+            name: bucketName(b.name),
+            size: human(b.bytes),
+            pct: diskPct.toFixed(2),
+            scanned: human(totalBytes),
+          });
+    row.innerHTML =
+      `<span class="type-swatch" style="background:${color}"></span>` +
+      `<span class="type-name">${escapeHtml(bucketName(b.name))}</span>` +
+      `<span class="type-bar-mini"><span class="type-bar-mini-inner" style="background:${color};width:${Math.max(
+        barW,
+        1.5
+      )}%"></span></span>` +
+      `<span class="type-meta">${human(b.bytes)}</span>` +
+      `<span class="type-meta">${diskPct.toFixed(2)}%</span>` +
+      `<span class="type-meta-small">${b.files.toLocaleString()}</span>`;
+    legend.appendChild(row);
+  }
+  return { buckets: buckets.length, totalBytes };
+}
+
+async function loadTypeStats() {
+  const d = await invoke("get_type_stats", { path: statsPath });
+  return renderTypeStats(d);
+}
+
+async function startStats(path, box, card) {
+  if (runKind !== null) return;
+  statsPath = path;
+  if (box) {
+    box.querySelectorAll(".drive-card").forEach((c) => c.classList.toggle("active", c === card));
+    if (card) markSelected(box, card);
+  }
+  runKind = "stats";
+  setUi();
+  resetStatsView();
+  $("t-scanned").textContent = path;
+  statsStatus(t("stats.analyzing", { path }));
+  try {
+    await invoke("stats_start", {
+      path,
+      mode: $("mode").value,
+      threads: navigator.hardwareConcurrency || 8,
+    });
+  } catch (e) {
+    runKind = null;
+    setUi();
+    statsStatus(t("status.error", { e }));
+  }
+}
+
+$("stats-cancel").onclick = () => {
+  invoke("scan_cancel")
+    .then(() => statsStatus(t("stats.cancelling")))
+    .catch((e) => statsStatus(t("status.cancel", { e })));
+};
+
 document.querySelectorAll(".modal .modal-x").forEach((b) => (b.onclick = closeModals));
+$("deleting-close").onclick = closeDeleting;
+$("deleting-cancel").onclick = cancelDeleting;
+$("help-btn").onclick = () => {
+  $("modal-help").hidden = false;
+  $("modal-help").querySelector(".modal-body").scrollTop = 0;
+};
+$("settings-btn").onclick = () => {
+  applyTheme();
+  $("modal-settings").hidden = false;
+};
+document.querySelectorAll(".seg-btn[data-theme]").forEach((b) => {
+  b.onclick = () => setTheme(b.dataset.theme);
+});
+$("lang-select").onchange = () => applyLang($("lang-select").value);
+
+/* ---------- About (reachable from the help page) ---------- */
+
+$("help-about").onclick = () => {
+  $("modal-about").hidden = false;
+};
+// The About box sits on top of Help: closing it only hides itself. It also
+// overrides the generic .modal-x binding above (assigned after it).
+const closeAbout = () => {
+  $("modal-about").hidden = true;
+};
+$("about-x").onclick = closeAbout;
+$("about-close").onclick = closeAbout;
+
+async function copyEmail() {
+  const email = "baroudi.inc@gmail.com";
+  try {
+    await navigator.clipboard.writeText(email);
+    toast(t("toast.copied"), "ok");
+  } catch (e) {
+    toast(`${email} — ${e}`, "warn");
+  }
+}
+$("about-email").onclick = copyEmail;
+$("about-email").onkeydown = (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    copyEmail();
+  }
+};
+
+/* ---------- first run: ask for language + theme ---------- */
+
+$("firstrun-lang").onchange = () => applyLang($("firstrun-lang").value);
+$("firstrun-go").onclick = () => {
+  const picked = document.querySelector("#theme-seg-onboard .seg-btn.on");
+  setTheme(picked ? picked.dataset.theme : themePref());
+  applyLang($("firstrun-lang").value);
+  try {
+    localStorage.setItem(ONBOARD_KEY, "1");
+  } catch (e) {
+    /* storage unavailable — the prompt simply returns next launch */
+  }
+  $("modal-firstrun").hidden = true;
+};
+
+function firstRun() {
+  try {
+    if (localStorage.getItem(ONBOARD_KEY) === "1") return false;
+  } catch (e) {
+    return false;
+  }
+  $("firstrun-lang").value = curLang();
+  applyTheme();
+  $("modal-firstrun").hidden = false;
+  return true;
+}
+
+function onLangChange() {
+  applyTheme();
+  setUi();
+  $("explorer-title").textContent =
+    explorerMode === "folders" ? t("explorer.allFolders") : t("explorer.allFiles");
+  filesList.reset(filesList.total, true);
+  junkList.render();
+  renderCleanSummary();
+  if (dupGroups.length) $("dupes-list").innerHTML = dupGroups.map(dupGroupHtml).join("");
+  renderDupSummary();
+  renderDupActions();
+  if (runKind === null && !$("type-legend").hidden) loadTypeStats().catch(() => {});
+  refreshVolumes();
+}
 $("modal-info").querySelector('[data-action="open"]').onclick = () =>
   actionOpen($("modal-info").dataset.path);
 $("modal-info").querySelector('[data-action="trash"]').onclick = () =>
@@ -1194,7 +1817,14 @@ $("modal-info").querySelector('[data-action="delete"]').onclick = () =>
   actionDelete($("modal-info").dataset.path);
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeModals();
+  if (e.key !== "Escape") return;
+  if (!$("modal-firstrun").hidden) return; // make a choice first
+  if (!$("modal-deleting").hidden && $("deleting-close").hidden) return; // purge running
+  if (!$("modal-about").hidden) {
+    $("modal-about").hidden = true;
+    return;
+  }
+  closeModals();
 });
 
 /* ---------- explorer controls ---------- */
@@ -1202,14 +1832,14 @@ document.addEventListener("keydown", (e) => {
 $("start").onclick = async () => {
   const path = $("path").value.trim();
   if (!path) {
-    setStatus("Pick a drive or type a folder first.");
+    setStatus(t("status.pickFolder"));
     return;
   }
   runKind = "scan";
   setUi();
   $("bar").style.width = "0%";
   filesList.reset(0);
-  setStatus(`Scanning ${path}…`);
+  setStatus(t("status.scanning", { path }));
   try {
     await invoke("scan_start", {
       path,
@@ -1219,14 +1849,14 @@ $("start").onclick = async () => {
   } catch (e) {
     runKind = null;
     setUi();
-    setStatus(`error: ${e}`);
+    setStatus(t("status.error", { e }));
   }
 };
 
 $("cancel").onclick = () => {
   invoke("scan_cancel")
-    .then(() => setStatus("Cancelling — finishing current folder…"))
-    .catch((e) => setStatus(`cancel: ${e}`));
+    .then(() => setStatus(t("status.cancelling")))
+    .catch((e) => setStatus(t("status.cancel", { e })));
 };
 
 /* ---------- tabs ---------- */
@@ -1268,25 +1898,46 @@ listen("scan-progress", (ev) => {
     $("c-scanned").textContent = p.files.toLocaleString();
     $("c-elapsed").textContent = `${(p.elapsed_ms / 1000).toFixed(2)} s`;
     cleanStatus(
-      `scanning… ${p.files.toLocaleString()} files, ${p.dirs.toLocaleString()} folders`
+      t("clean.scanningProgress", {
+        files: p.files.toLocaleString(),
+        folders: p.dirs.toLocaleString(),
+      })
     );
+    streamClean();
   } else if (p.kind === "dupes") {
     if (runKind !== "dupes") return;
     $("d-scanned").textContent = p.files.toLocaleString();
     $("d-elapsed").textContent = `${(p.elapsed_ms / 1000).toFixed(2)} s`;
     dupStatus(
       p.phase === "hash"
-        ? `checking duplicates… ${p.files.toLocaleString()} files read`
-        : `scanning… ${p.files.toLocaleString()} files, ${p.dirs.toLocaleString()} folders`
+        ? t("dupes.hashing", { files: p.files.toLocaleString() })
+        : t("dupes.scanningProgress", {
+            files: p.files.toLocaleString(),
+            folders: p.dirs.toLocaleString(),
+          })
+    );
+  } else if (p.kind === "stats") {
+    if (runKind !== "stats") return;
+    $("t-files").textContent = p.files.toLocaleString();
+    $("t-elapsed").textContent = `${(p.elapsed_ms / 1000).toFixed(2)} s`;
+    statsStatus(
+      t("stats.scanningProgress", {
+        files: p.files.toLocaleString(),
+        folders: p.dirs.toLocaleString(),
+      })
     );
   } else {
     if (runKind !== "scan") return;
     renderScanStats(p, false);
     setStatus(
-      `scanning… ${p.files.toLocaleString()} files, ${p.dirs.toLocaleString()} folders`
+      t("status.scanningProgress", {
+        files: p.files.toLocaleString(),
+        folders: p.dirs.toLocaleString(),
+      })
     );
+    streamExplorer();
   }
-}).catch((e) => setStatus(`listen progress failed: ${e}`));
+}).catch((e) => setStatus(t("status.listenProgressFail", { e })));
 
 listen("scan-done", async (ev) => {
   const p = ev.payload;
@@ -1297,7 +1948,7 @@ listen("scan-done", async (ev) => {
     setUi();
     $("dupes-bar").style.width = "100%";
     if (p.error) {
-      dupStatus(`error: ${p.error}`);
+      dupStatus(t("status.error", { e: p.error }));
       return;
     }
     $("d-scanned").textContent = p.files.toLocaleString();
@@ -1305,19 +1956,27 @@ listen("scan-done", async (ev) => {
     await loadDupes(true);
     dupStatus(
       p.cancelled
-        ? `Cancelled after ${secs} s — ${p.dup_groups.toLocaleString()} duplicate groups found.`
+        ? t("dupes.cancelled", { secs, groups: p.dup_groups.toLocaleString() })
         : p.dup_groups === 0
-        ? `No duplicates on ${dupPath} at this size floor — scanned ${p.files.toLocaleString()} files in ${secs} s.`
-        : `Found ${p.dup_groups.toLocaleString()} duplicate groups — ${human(
-            p.dup_wasted
-          )} reclaimable across ${p.dup_files.toLocaleString()} copies. Scanned ${p.files.toLocaleString()} files in ${secs} s.`
+        ? t("dupes.none", {
+            path: dupPath,
+            files: p.files.toLocaleString(),
+            secs,
+          })
+        : t("dupes.found", {
+            groups: p.dup_groups.toLocaleString(),
+            wasted: human(p.dup_wasted),
+            copies: p.dup_files.toLocaleString(),
+            files: p.files.toLocaleString(),
+            secs,
+          })
     );
   } else if (p.kind === "clean") {
     runKind = null;
     setUi();
     $("clean-bar").style.width = "100%";
     if (p.error) {
-      cleanStatus(`error: ${p.error}`);
+      cleanStatus(t("status.error", { e: p.error }));
       junkList.reset(0);
       return;
     }
@@ -1334,12 +1993,50 @@ listen("scan-done", async (ev) => {
     junkList.render();
     cleanStatus(
       p.cancelled
-        ? `Cancelled after ${secs} s — ${p.junk_files.toLocaleString()} junk files found.`
+        ? t("clean.cancelled", { secs, files: p.junk_files.toLocaleString() })
         : p.junk_files === 0
-        ? `Nothing to clean on ${cleanPath} — scanned ${p.files.toLocaleString()} files in ${secs} s.`
-        : `Found ${p.junk_files.toLocaleString()} files to remove — ${human(
-            p.junk_bytes
-          )} reclaimable (${p.junk_safe_files.toLocaleString()} safe · ${p.junk_optional_files.toLocaleString()} optional). Scanned ${p.files.toLocaleString()} files in ${secs} s.`
+        ? t("clean.nothing", {
+            path: cleanPath,
+            files: p.files.toLocaleString(),
+            secs,
+          })
+        : t("clean.found", {
+            files: p.junk_files.toLocaleString(),
+            size: human(p.junk_bytes),
+            safe: p.junk_safe_files.toLocaleString(),
+            optional: p.junk_optional_files.toLocaleString(),
+            scanned: p.files.toLocaleString(),
+            secs,
+          })
+    );
+  } else if (p.kind === "stats") {
+    runKind = null;
+    setUi();
+    $("stats-bar").style.width = "100%";
+    if (p.error) {
+      statsStatus(t("status.error", { e: p.error }));
+      return;
+    }
+    $("t-files").textContent = p.files.toLocaleString();
+    $("t-elapsed").textContent = `${secs} s`;
+    let cats = 0;
+    let total = 0;
+    try {
+      ({ buckets: cats, totalBytes: total } = await loadTypeStats());
+    } catch (e) {
+      statsStatus(t("status.error", { e }));
+      return;
+    }
+    statsStatus(
+      p.cancelled
+        ? t("stats.cancelled", { secs, cats, size: human(total) })
+        : t("stats.done", {
+            files: p.files.toLocaleString(),
+            path: statsPath,
+            secs,
+            cats,
+            size: human(total),
+          })
     );
   } else {
     runKind = null;
@@ -1347,24 +2044,48 @@ listen("scan-done", async (ev) => {
     renderScanStats(p, p.cancelled);
     $("bar").style.width = "100%";
     if (p.error) {
-      setStatus(`error: ${p.error}`);
+      setStatus(t("status.error", { e: p.error }));
       filesList.reset(0);
       return;
     }
     filesList.reset(p.total_listed);
     setStatus(
       p.cancelled
-        ? `Cancelled after ${secs} s — ${p.files.toLocaleString()} files found.`
-        : `Done in ${secs} s — ${p.files.toLocaleString()} files, ${human(p.bytes)}.`
+        ? t("status.doneCancelled", { secs, files: p.files.toLocaleString() })
+        : t("status.done", { secs, files: p.files.toLocaleString(), size: human(p.bytes) })
     );
-    await filesList.refreshMax();
-    filesList.render();
+    await refreshExplorerList();
   }
   refreshVolumes();
-}).catch((e) => setStatus(`listen done failed: ${e}`));
+}).catch((e) => setStatus(t("status.listenDoneFail", { e })));
+
+listen("delete-progress", (ev) => {
+  const p = ev.payload;
+  updateDeleting(p);
+  const msg = t("clean.deleting", {
+    done: p.deleted.toLocaleString(),
+    total: p.total.toLocaleString(),
+  });
+  if (p.kind === "dupes") {
+    dupStatus(msg);
+    // Drop the copies that just went away so the groups shrink live.
+    applyDupRemoved(p.removed);
+  } else {
+    cleanStatus(msg);
+    // The junk list is a virtual list backed by `get_junk`; re-page it so the
+    // rows the backend just removed disappear from view. Shrink the row count
+    // by the batch we just dropped so the scrollbar tracks the live total; the
+    // authoritative `remaining` is applied when the purge returns.
+    const gone = p.removed ? p.removed.length : 0;
+    junkList.reset(Math.max(0, junkList.total - gone), true);
+  }
+}).catch((e) => setStatus(t("status.listenProgressFail", { e })));
 
 /* ---------- init ---------- */
 
+applyLang(curLang());
+window.__onLangChange = onLangChange;
+firstRun();
 refreshVolumes();
 setUi();
 filesList.reset(0);

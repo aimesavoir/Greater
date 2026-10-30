@@ -1,0 +1,30 @@
+# Rust / Cargo build output
+target/
+**/target/
+
+# Tauri: regenerated on every build (ACL schemas)
+app/src-tauri/gen/schemas/
+
+# Installer bundles and compiled binaries
+*.exe
+*.msi
+*.pdb
+*.dll
+*.lib
+*.exp
+
+# Logs
+*.log
+
+# OS metadata
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Node (the UI is vanilla JS, but keep this for safety)
+node_modules/

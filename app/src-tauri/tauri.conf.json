@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Greater",
+  "version": "1.0.0",
+  "identifier": "com.greater.disk",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Greater",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "MECATROTEC",
+    "copyright": "Copyright \u00a9 2026 MECATROTEC",
+    "category": "Utility",
+    "shortDescription": "Disk usage analyzer for Windows",
+    "longDescription": "Greater is a fast, safe disk-usage analyzer for Windows. Scan drives in seconds, find junk and duplicate files, and see exactly where your space goes.",
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["English", "French", "Spanish", "German", "Arabic"],
+        "displayLanguageSelector": true
+      }
+    }
+  }
+}
