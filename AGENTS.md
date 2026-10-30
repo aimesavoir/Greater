@@ -177,6 +177,16 @@ Pages build with `gh api repos/aimesavoir/Greater-Site/pages/builds/latest`
 `gh` resolves the repo from the working directory — pass `-R` when not in
 `site/`, or it looks at the private repo and reports "release not found".
 
+**The installer is unsigned** (`Get-AuthenticodeSignature` → `NotSigned`), so
+Windows shows a reputation warning on download and on launch — the user asked
+about it. The page answers it in the `.warn` box of the install section (plus FAQ
+`q9`): it explains that the message is "unrecognized app", not a virus
+detection, gives the two clicks, and publishes the SHA-256 so anyone can verify
+the file. The same hash is attached to the release as `SHA256SUMS.txt`.
+**Whenever the installer is rebuilt, update all three**: the `code.hash` text in
+`index.html`, `SHA256SUMS.txt` on the release (`gh release upload --clobber`),
+and the hash in the release notes. A stale hash is worse than no hash.
+
 App commands: `list_volumes` (letter/label/fs/total/free), `scan_start`,
 `stats_start(path, mode, threads)`, `clean_start`,
 `dupes_start(path, mode, threads, min_size)`, `scan_cancel`,
