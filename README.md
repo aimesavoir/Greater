@@ -63,9 +63,19 @@ A **Cancel** button stops the purge within one batch.
 
 ## Install
 
-Download `Greater_1.0.0_x64-setup.exe` and run it. The installer is `perMachine`
-(installs to `C:\Program Files\Greater`, needs admin) and embeds the WebView2
-bootstrapper, so machines without the runtime can still install.
+Product page: **<https://aimesavoir.github.io/Greater-Site/>** — features,
+explanations, screenshots and the download link (Arabic version:
+<https://aimesavoir.github.io/Greater-Site/?lang=ar>).
+
+Download [`Greater_1.0.0_x64-setup.exe`](https://github.com/aimesavoir/Greater-Site/releases/latest/download/Greater_1.0.0_x64-setup.exe)
+and run it. The installer is `perMachine` (installs to `C:\Program Files\Greater`,
+needs admin) and embeds the WebView2 bootstrapper, so machines without the
+runtime can still install.
+
+The public page and the installer live in the separate public repository
+[`aimesavoir/Greater-Site`](https://github.com/aimesavoir/Greater-Site); the
+sources stay in this private repository. `site/` is excluded here (see
+`.gitignore`) because it is its own git repository.
 
 ## Requirements
 
