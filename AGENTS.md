@@ -187,6 +187,19 @@ the file. The same hash is attached to the release as `SHA256SUMS.txt`.
 `index.html`, `SHA256SUMS.txt` on the release (`gh release upload --clobber`),
 and the hash in the release notes. A stale hash is worse than no hash.
 
+The `#downloads` section (nav link `nav.downloads`) is a **hand-maintained
+static table** — no `api.github.com` call, so the page keeps working when GitHub
+is down or the visitor is rate-limited. Each release adds a `<tr>` with version,
+`dl.rN.date`, size, its own `<code class="sum">` SHA-256 and a direct
+`releases/download/v<ver>/...` link; the newest row also carries the
+`dl.latest` badge. Keep rows newest-first and never delete old ones — the whole
+point is that a bad update never traps a user. New row = new keys in **both**
+`index.html` and the `AR` map (`dl.rN.date`, `dl.rN.btn`); the key sets must stay
+equal (currently 140). Under 640 px `main.js` copies each translated `<th>` onto
+the matching cell as `data-label` (`syncLabels()`), which drives the stacked card
+layout in `styles.css` — so a new column needs no extra CSS, only a `data-t`
+heading.
+
 App commands: `list_volumes` (letter/label/fs/total/free), `scan_start`,
 `stats_start(path, mode, threads)`, `clean_start`,
 `dupes_start(path, mode, threads, min_size)`, `scan_cancel`,
