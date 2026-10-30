@@ -28,3 +28,6 @@ desktop.ini
 
 # Node (the UI is vanilla JS, but keep this for safety)
 node_modules/
+
+# Public product page: its own repository (aimesavoir/Greater-Site)
+/site/
