@@ -135,4 +135,7 @@ docs/              Architecture notes
 
 ## License
 
-Not yet chosen — see the repository owner.
+Original Greater source code authored by Mohamed Baroudi is licensed under the
+MIT License; see [LICENSE](LICENSE). Third-party icons, images, fonts, and other
+bundled assets are excluded from this license and remain under their respective
+licenses.
